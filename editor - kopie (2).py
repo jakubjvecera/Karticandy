@@ -22,9 +22,7 @@ NS = {
 def svg_to_png_bytes(svg_path, dpi=150):
     """Převede SVG na PNG přes Inkscape CLI do paměti (Windows kompatibilní)."""
     if not INKSCAPE_PATH.exists():
-        raise FileNotFoundError(f"Inkscape nebyl nalezen: {INKSCAPE_PATH}")
-
-    if not os.path.exists(svg_path):
+        raise FileNotFoundError(f"Inkscape nebyl n
         raise FileNotFoundError(f"SVG soubor neexistuje: {svg_path}")
 
     with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
