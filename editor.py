@@ -12,10 +12,31 @@ import subprocess
 from pathlib import Path
 import tempfile
 import base64
-
+import sys
+from pathlib import Path
 OUTPUT_FOLDER = "vystup"
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
-INKSCAPE_PATH = Path("inkscape_portable/InkscapePortable.exe")
+
+
+# --- Najdi správnou cestu k Inkscapu podle toho, odkud je program spuštěný ---
+if getattr(sys, 'frozen', False):
+    # Pokud je aplikace zabalena do .exe (PyInstaller apod.)
+    BASE_DIR = Path(sys.executable).parent
+else:
+    # Pokud běží jako .py skript
+    BASE_DIR = Path(__file__).parent
+
+# Upřednostni tichou binárku bez splash screenu a omezení jedné instance
+INKSCAPE_PATH = BASE_DIR / "inkscape_portable/App/Inkscape/bin/inkscape.exe"
+
+# Fallback na PortableApps launcher, pokud někdo složku strukturoval jinak
+if not INKSCAPE_PATH.exists():
+    INKSCAPE_PATH = BASE_DIR / "inkscape_portable/InkscapePortable.exe"
+
+# Zkontroluj, jestli Inkscape existuje
+if not INKSCAPE_PATH.exists():
+    raise FileNotFoundError(f"Inkscape nebyl nalezen: {INKSCAPE_PATH}")
+
 
 NS = {
     'svg': "http://www.w3.org/2000/svg",
@@ -362,10 +383,12 @@ class SVGEditor(TkinterDnD.Tk):
             messagebox.showinfo("Hotovo", f"SVG uložen: {self.current_svg_path}")
             self.original_img = None
             for attr in ("canvas_image_id", "canvas_box_id"):
-                if hasattr(self, attr):
+                 if hasattr(self, attr):
                     self.canvas.delete(getattr(self, attr))
                     delattr(self, attr)
-            self.next_svg()
+            
+            self.svg_cache.pop(self.svg_files[self.current_index], None)
+            self.load_svg(self.current_index)
         except Exception as e:
             messagebox.showerror("Chyba", str(e))
 
