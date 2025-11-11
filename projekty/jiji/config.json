@@ -1,0 +1,21 @@
+{
+    "generator": {
+        "rozm\u011br_karty": "63x88mm",
+        "barvy": "RGB"
+    },
+    "editor": {
+        "font": "Arial",
+        "velikost": 12
+    },
+    "prevod": {
+        "form\u00e1t": "PNG"
+    },
+    "tisk": {
+        "printer": "HP_LaserJet",
+        "duplex": true
+    },
+    "zdroje": {
+        "excel": "",
+        "sablona": ""
+    }
+}

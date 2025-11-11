@@ -1,2 +1,0 @@
-py -3 generator.py
-py -3 tisk.py
