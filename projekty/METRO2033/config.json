@@ -12,7 +12,7 @@
     },
     "tisk": {
         "printer": "HP_LaserJet",
-        "duplex": true
+        "duplex": false
     },
     "zdroje": {
         "excel": "karty.xlsx",
