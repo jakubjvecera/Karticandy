@@ -1,14 +1,14 @@
 {
     "generator": {
-        "rozm\u011br_karty": "63x88mm",
-        "barvy": "RGB"
+        "rozměr_karty": "63x88mm",
+        "barvy": "RGS"
     },
     "editor": {
         "font": "Arial",
         "velikost": 12
     },
     "prevod": {
-        "form\u00e1t": "PNG"
+        "formát": "PNG"
     },
     "tisk": {
         "printer": "HP_LaserJet",

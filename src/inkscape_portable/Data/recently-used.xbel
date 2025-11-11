@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xbel version="1.0"
+      xmlns:bookmark="http://www.freedesktop.org/standards/desktop-bookmarks"
+      xmlns:mime="http://www.freedesktop.org/standards/shared-mime-info"
+>
+  <bookmark href="file:///C:/Users/jakub/Documents/ProgramKeKartam/karty/vystup/Anton.svg" added="2025-11-09T08:58:24.480852Z" modified="2025-11-09T08:58:24.480852Z" visited="2025-11-09T08:58:24.480852Z">
+    <info>
+      <metadata owner="http://freedesktop.org">
+        <mime:mime-type type="image/svg+xml"/>
+        <bookmark:applications>
+          <bookmark:application name="org.inkscape.Inkscape" exec="&apos;org.inkscape.Inkscape %u&apos;" modified="2025-11-09T08:58:24.480852Z" count="1"/>
+        </bookmark:applications>
+      </metadata>
+    </info>
+  </bookmark>
+  <bookmark href="file:///C:/Users/jakub/Documents/ProgramKeKartam/karty/vystup/Hneda_brecka.svg" added="2025-11-09T10:20:45.509065Z" modified="2025-11-09T10:20:45.509065Z" visited="2025-11-09T10:20:45.509065Z">
+    <info>
+      <metadata owner="http://freedesktop.org">
+        <mime:mime-type type="image/svg+xml"/>
+        <bookmark:applications>
+          <bookmark:application name="org.inkscape.Inkscape" exec="&apos;org.inkscape.Inkscape %u&apos;" modified="2025-11-09T10:20:45.509065Z" count="1"/>
+        </bookmark:applications>
+      </metadata>
+    </info>
+  </bookmark>
+  <bookmark href="file:///C:/Users/jakub/Documents/ProgramKeKartam/karty/vystup/Bourbon.svg" added="2025-11-09T13:39:04.227782Z" modified="2025-11-09T13:39:04.227782Z" visited="2025-11-09T13:39:04.227782Z">
+    <info>
+      <metadata owner="http://freedesktop.org">
+        <mime:mime-type type="image/svg+xml"/>
+        <bookmark:applications>
+          <bookmark:application name="org.inkscape.Inkscape" exec="&apos;org.inkscape.Inkscape %u&apos;" modified="2025-11-09T13:39:04.227782Z" count="1"/>
+        </bookmark:applications>
+      </metadata>
+    </info>
+  </bookmark>
+  <bookmark href="file:///C:/Users/jakub/Documents/ProgramKeKartam/karty/vystup/Hanzovni_vojak.svg" added="2025-11-09T13:55:49.372200Z" modified="2025-11-09T13:55:53.269441Z" visited="2025-11-09T13:55:49.372200Z">
+    <info>
+      <metadata owner="http://freedesktop.org">
+        <mime:mime-type type="image/svg+xml"/>
+        <bookmark:applications>
+          <bookmark:application name="org.inkscape.Inkscape" exec="&apos;org.inkscape.Inkscape %u&apos;" modified="2025-11-09T13:55:53.269441Z" count="3"/>
+        </bookmark:applications>
+      </metadata>
+    </info>
+  </bookmark>
+</xbel>

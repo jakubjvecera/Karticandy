@@ -1,4 +1,0 @@
-/* This fix a bad performance on Mac (maybe others) on some themes */
-button,
-spinbutton,
-combobox {box-shadow: none;}

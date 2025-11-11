@@ -13,30 +13,29 @@ from pathlib import Path
 import tempfile
 import base64
 import sys
-from pathlib import Path
-OUTPUT_FOLDER = "vystup"
-os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
+# ---------------- Cesta k projektu ----------------
+if len(sys.argv) < 2:
+    print("Nebyla předána cesta k projektu.")
+    sys.exit(1)
+
+PROJECT_PATH = Path(sys.argv[1])
+OUTPUT_FOLDER = PROJECT_PATH / "vystup" / "vystup_svg"
+if not OUTPUT_FOLDER.exists():
+    print(f"Složka se SVG soubory neexistuje: {OUTPUT_FOLDER}")
+    sys.exit(1)
 
 # --- Najdi správnou cestu k Inkscapu podle toho, odkud je program spuštěný ---
 if getattr(sys, 'frozen', False):
-    # Pokud je aplikace zabalena do .exe (PyInstaller apod.)
     BASE_DIR = Path(sys.executable).parent
 else:
-    # Pokud běží jako .py skript
     BASE_DIR = Path(__file__).parent
 
-# Upřednostni tichou binárku bez splash screenu a omezení jedné instance
 INKSCAPE_PATH = BASE_DIR / "inkscape_portable/App/Inkscape/bin/inkscape.exe"
-
-# Fallback na PortableApps launcher, pokud někdo složku strukturoval jinak
 if not INKSCAPE_PATH.exists():
     INKSCAPE_PATH = BASE_DIR / "inkscape_portable/InkscapePortable.exe"
-
-# Zkontroluj, jestli Inkscape existuje
 if not INKSCAPE_PATH.exists():
     raise FileNotFoundError(f"Inkscape nebyl nalezen: {INKSCAPE_PATH}")
-
 
 NS = {
     'svg': "http://www.w3.org/2000/svg",
@@ -46,7 +45,7 @@ NS = {
 
 INKSCAPE_LOCK = threading.Lock()  # zajistí, že nikdy nepojede více instancí Inkscape najednou
 
-# --- Pomocné funkce ---
+# ---------------- Pomocné funkce ----------------
 def svg_to_png_bytes(svg_path, dpi=150):
     if not INKSCAPE_PATH.exists():
         raise FileNotFoundError(f"Inkscape nebyl nalezen: {INKSCAPE_PATH}")
@@ -65,7 +64,6 @@ def svg_to_png_bytes(svg_path, dpi=150):
         return tmp.read()
 
 def svg_to_png_bytes_threadsafe(svg_path, dpi=150):
-    """Zajišťuje exkluzivní přístup k Inkscape."""
     with INKSCAPE_LOCK:
         return svg_to_png_bytes(svg_path, dpi)
 
@@ -98,14 +96,15 @@ def replace_image_in_svg(tree, new_image_path, pos, size):
     image_el.set("height", str(size[1]))
     return tree
 
-# --- Hlavní aplikace ---
+# ---------------- Hlavní aplikace ----------------
 class SVGEditor(TkinterDnD.Tk):
     def __init__(self):
         super().__init__()
         self.title("SVG Editor s PNG/JPG vkládáním")
         self.geometry("1200x800")
 
-        self.svg_files = [f for f in os.listdir(OUTPUT_FOLDER) if f.endswith(".svg")]
+        # --- Načtení všech SVG rekurzivně včetně podsložek kategorií ---
+        self.svg_files = [str(p.relative_to(PROJECT_PATH)) for p in OUTPUT_FOLDER.rglob("*.svg")]
         self.current_index = 0
 
         self.drag_data = {"x": 0, "y": 0}
@@ -117,7 +116,6 @@ class SVGEditor(TkinterDnD.Tk):
         self.canvas_scale = 1.0
         self.svg_cache = {}
 
-        # Preloader control
         self.stop_preloader = threading.Event()
         self.preloader_thread = threading.Thread(target=self.preload_loop, daemon=True)
         self.preloader_thread.start()
@@ -128,7 +126,7 @@ class SVGEditor(TkinterDnD.Tk):
 
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
-    # --- UI ---
+    # ---------------- UI ----------------
     def setup_ui(self):
         self.listbox = tk.Listbox(self, width=30)
         self.listbox.pack(side=tk.LEFT, fill=tk.Y)
@@ -163,7 +161,7 @@ class SVGEditor(TkinterDnD.Tk):
         self.bind_all("<Control-s>", lambda event: self.save_svg())
         self.bind_all("<Return>", lambda event: self.save_svg())
 
-    # --- SVG navigace ---
+    # ---------------- Navigace ----------------
     def on_list_select(self, event):
         selection = event.widget.curselection()
         if selection:
@@ -177,11 +175,11 @@ class SVGEditor(TkinterDnD.Tk):
         self.current_index = (self.current_index + 1) % len(self.svg_files)
         self.load_svg(self.current_index)
 
-    # --- Asynchronní načítání SVG ---
+    # ---------------- Načítání SVG ----------------
     def load_svg(self, index):
         self.current_index = index
         filename = self.svg_files[index]
-        self.current_svg_path = os.path.abspath(os.path.join(OUTPUT_FOLDER, filename))
+        self.current_svg_path = PROJECT_PATH / filename
         self.canvas.delete("all")
         self.canvas.create_text(
             max(1, self.canvas.winfo_width() // 2),
@@ -193,7 +191,6 @@ class SVGEditor(TkinterDnD.Tk):
 
         def load_thread():
             try:
-                # --- 1️⃣ Použij cache, pokud existuje ---
                 if filename in self.svg_cache:
                     img = self.svg_cache[filename]
                 else:
@@ -201,20 +198,16 @@ class SVGEditor(TkinterDnD.Tk):
                     img = Image.open(io.BytesIO(png_data))
                     self.svg_cache[filename] = img
 
-                # --- 2️⃣ Zobraz náhled ---
                 self.img = img
                 self.after(0, self.center_display_svg)
 
-                # --- 3️⃣ Načti SVG do paměti s podporou huge_tree ---
                 parser = ET.XMLParser(huge_tree=True)
                 self.tree = ET.parse(self.current_svg_path, parser=parser)
                 self.root = self.tree.getroot()
 
-                # --- 4️⃣ Pokud byl dříve vložený obrázek, znovu ho zobraz ---
                 if self.original_img:
                     self.after(0, lambda: self.load_dropped_image(None))
 
-                # --- 5️⃣ Aktualizuj výběr v seznamu ---
                 self.after(0, lambda: (
                     self.listbox.selection_clear(0, tk.END),
                     self.listbox.selection_set(self.current_index),
@@ -226,7 +219,7 @@ class SVGEditor(TkinterDnD.Tk):
 
         threading.Thread(target=load_thread, daemon=True).start()
 
-    # --- Preloader běžící trvale ---
+    # ---------------- Preloader ----------------
     def preload_loop(self):
         while not self.stop_preloader.is_set():
             if not self.svg_files:
@@ -239,7 +232,7 @@ class SVGEditor(TkinterDnD.Tk):
                     return
                 filename = self.svg_files[idx]
                 if filename not in self.svg_cache:
-                    path = os.path.join(OUTPUT_FOLDER, filename)
+                    path = PROJECT_PATH / filename
                     try:
                         if INKSCAPE_LOCK.locked():
                             time.sleep(0.5)
@@ -251,7 +244,7 @@ class SVGEditor(TkinterDnD.Tk):
                         pass
             time.sleep(3)
 
-    # --- Zobrazení SVG ---
+    # ---------------- Zobrazení SVG ----------------
     def center_display_svg(self):
         self.update_idletasks()
         canvas_width = self.canvas.winfo_width()
@@ -278,7 +271,7 @@ class SVGEditor(TkinterDnD.Tk):
         self.canvas.delete("all")
         self.canvas.create_image(offset_x, offset_y, anchor="nw", image=self.svg_tk_img)
 
-    # --- Drag & Drop obrázek ---
+    # ---------------- Drag & Drop a změna obrázku ----------------
     def start_drag(self, event):
         self.drag_data["x"], self.drag_data["y"] = event.x, event.y
 
@@ -356,7 +349,7 @@ class SVGEditor(TkinterDnD.Tk):
         except Exception as e:
             messagebox.showerror("Chyba", f"Nepodařilo se otevřít Inkscape: {e}")
 
-    # --- Uložení ---
+    # ---------------- Uložení SVG ----------------
     def save_svg(self):
         if self.original_img is None:
             messagebox.showerror("Chyba", "Nejdříve vložte obrázek")
