@@ -3,7 +3,7 @@ import os
 import threading
 import time
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 from tkinterdnd2 import DND_FILES, TkinterDnD
 from PIL import Image, ImageTk
 import lxml.etree as ET
@@ -25,7 +25,7 @@ if not OUTPUT_FOLDER.exists():
     print(f"Složka se SVG soubory neexistuje: {OUTPUT_FOLDER}")
     sys.exit(1)
 
-# --- Najdi správnou cestu k Inkscapu podle toho, odkud je program spuštěný ---
+# --- Najdi správnou cestu k Inkscapu ---
 if getattr(sys, 'frozen', False):
     BASE_DIR = Path(sys.executable).parent
 else:
@@ -43,7 +43,7 @@ NS = {
     'xlink': "http://www.w3.org/1999/xlink"
 }
 
-INKSCAPE_LOCK = threading.Lock()  # zajistí, že nikdy nepojede více instancí Inkscape najednou
+INKSCAPE_LOCK = threading.Lock()
 
 # ---------------- Pomocné funkce ----------------
 def svg_to_png_bytes(svg_path, dpi=150):
@@ -103,15 +103,14 @@ class SVGEditor(TkinterDnD.Tk):
         self.title("SVG Editor s PNG/JPG vkládáním")
         self.geometry("1200x800")
 
-        # --- Načtení všech SVG rekurzivně včetně podsložek kategorií ---
-        self.svg_files = [str(p.relative_to(PROJECT_PATH)) for p in OUTPUT_FOLDER.rglob("*.svg")]
+        # --- Načtení všech SVG rekurzivně ---
+        self.svg_files = [p for p in OUTPUT_FOLDER.rglob("*.svg")]
         self.current_index = 0
 
         self.drag_data = {"x": 0, "y": 0}
         self.image_pos = (0, 0)
         self.image_size = (0, 0)
         self.original_img = None
-
         self.canvas_offset = (0, 0)
         self.canvas_scale = 1.0
         self.svg_cache = {}
@@ -122,17 +121,33 @@ class SVGEditor(TkinterDnD.Tk):
 
         self.setup_ui()
         if self.svg_files:
-            self.load_svg(self.current_index)
+            self.update_tree()
+            self.load_svg_by_path(self.svg_files[0])
 
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
     # ---------------- UI ----------------
     def setup_ui(self):
-        self.listbox = tk.Listbox(self, width=30)
-        self.listbox.pack(side=tk.LEFT, fill=tk.Y)
-        for f in self.svg_files:
-            self.listbox.insert(tk.END, f)
-        self.listbox.bind("<<ListboxSelect>>", self.on_list_select)
+        self.right_frame = tk.Frame(self)
+        self.right_frame.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.filter_var = tk.StringVar()
+        self.filter_entry = tk.Entry(self.right_frame, textvariable=self.filter_var)
+        self.filter_entry.pack(pady=5)
+        self.filter_var.trace_add("write", lambda *args: self.update_tree())
+
+        self.tree = ttk.Treeview(self.right_frame)
+        self.tree.pack(expand=True, fill=tk.BOTH)
+        self.tree.bind("<<TreeviewSelect>>", self.on_tree_select)
+
+        self.add_png_btn = tk.Button(self.right_frame, text="Přidat PNG/JPG", command=self.add_png)
+        self.add_png_btn.pack(pady=10)
+
+        self.save_btn = tk.Button(self.right_frame, text="Uložit SVG", command=self.save_svg)
+        self.save_btn.pack(pady=10)
+
+        self.open_inkscape_btn = tk.Button(self.right_frame, text="Otevřít v Inkscape", command=self.open_in_inkscape)
+        self.open_inkscape_btn.pack(side=tk.BOTTOM, pady=10)
 
         self.canvas = tk.Canvas(self, bg="white")
         self.canvas.pack(side=tk.LEFT, expand=True, fill=tk.BOTH)
@@ -144,29 +159,49 @@ class SVGEditor(TkinterDnD.Tk):
         self.canvas.drop_target_register(DND_FILES)
         self.canvas.dnd_bind('<<Drop>>', self.drop_file)
 
-        self.right_frame = tk.Frame(self)
-        self.right_frame.pack(side=tk.RIGHT, fill=tk.Y)
-
-        self.add_png_btn = tk.Button(self.right_frame, text="Přidat PNG/JPG", command=self.add_png)
-        self.add_png_btn.pack(pady=10)
-
-        self.save_btn = tk.Button(self.right_frame, text="Uložit SVG", command=self.save_svg)
-        self.save_btn.pack(pady=10)
-
-        self.open_inkscape_btn = tk.Button(self.right_frame, text="Otevřít v Inkscape", command=self.open_in_inkscape)
-        self.open_inkscape_btn.pack(side=tk.BOTTOM, pady=10)
-
         self.bind("<Left>", self.prev_svg)
         self.bind("<Right>", self.next_svg)
         self.bind_all("<Control-s>", lambda event: self.save_svg())
         self.bind_all("<Return>", lambda event: self.save_svg())
 
-    # ---------------- Navigace ----------------
-    def on_list_select(self, event):
-        selection = event.widget.curselection()
-        if selection:
-            self.load_svg(selection[0])
+    # ---------------- Stromová struktura ----------------
+    def update_tree(self):
+        self.tree.delete(*self.tree.get_children())
+        filter_text = self.filter_var.get().lower()
 
+        categories = {}
+        for full_path in self.svg_files:
+            try:
+                rel_path = full_path.relative_to(OUTPUT_FOLDER)
+            except ValueError:
+                continue
+            parts = rel_path.parts
+            if len(parts) < 2:
+                continue
+            cat, file = parts[0], parts[-1]
+            if cat not in categories:
+                categories[cat] = []
+            if filter_text in file.lower():
+                categories[cat].append(full_path)
+
+        for cat, files in categories.items():
+            cat_id = self.tree.insert("", "end", text=cat, open=True)
+            for fpath in sorted(files):
+                self.tree.insert(cat_id, "end", text=fpath.name, values=(str(fpath),))
+
+    def on_tree_select(self, event):
+        selected = self.tree.selection()
+        if not selected:
+            return
+        parent_id = self.tree.parent(selected[0])
+        if parent_id == "":
+            return  # Kategorie, ne soubor
+        fpath_str = self.tree.item(selected[0])['values'][0]
+        svg_path = Path(fpath_str)
+        if svg_path.exists():
+            self.load_svg_by_path(svg_path)
+
+    # ---------------- Navigace ----------------
     def prev_svg(self, event=None):
         self.current_index = (self.current_index - 1) % len(self.svg_files)
         self.load_svg(self.current_index)
@@ -178,8 +213,10 @@ class SVGEditor(TkinterDnD.Tk):
     # ---------------- Načítání SVG ----------------
     def load_svg(self, index):
         self.current_index = index
-        filename = self.svg_files[index]
-        self.current_svg_path = PROJECT_PATH / filename
+        self.load_svg_by_path(self.svg_files[index])
+
+    def load_svg_by_path(self, path):
+        self.current_svg_path = path
         self.canvas.delete("all")
         self.canvas.create_text(
             max(1, self.canvas.winfo_width() // 2),
@@ -191,29 +228,22 @@ class SVGEditor(TkinterDnD.Tk):
 
         def load_thread():
             try:
-                if filename in self.svg_cache:
-                    img = self.svg_cache[filename]
+                if path in self.svg_cache:
+                    img = self.svg_cache[path]
                 else:
-                    png_data = svg_to_png_bytes_threadsafe(self.current_svg_path)
+                    png_data = svg_to_png_bytes_threadsafe(path)
                     img = Image.open(io.BytesIO(png_data))
-                    self.svg_cache[filename] = img
+                    self.svg_cache[path] = img
 
                 self.img = img
                 self.after(0, self.center_display_svg)
 
                 parser = ET.XMLParser(huge_tree=True)
-                self.tree = ET.parse(self.current_svg_path, parser=parser)
-                self.root = self.tree.getroot()
+                self.tree_xml = ET.parse(path, parser=parser)
+                self.root = self.tree_xml.getroot()
 
                 if self.original_img:
                     self.after(0, lambda: self.load_dropped_image(None))
-
-                self.after(0, lambda: (
-                    self.listbox.selection_clear(0, tk.END),
-                    self.listbox.selection_set(self.current_index),
-                    self.listbox.see(self.current_index)
-                ))
-
             except Exception as e:
                 self.after(0, lambda: messagebox.showerror("Chyba", str(e)))
 
@@ -230,16 +260,15 @@ class SVGEditor(TkinterDnD.Tk):
             for idx in indices:
                 if self.stop_preloader.is_set():
                     return
-                filename = self.svg_files[idx]
-                if filename not in self.svg_cache:
-                    path = PROJECT_PATH / filename
+                path = self.svg_files[idx]
+                if path not in self.svg_cache:
                     try:
                         if INKSCAPE_LOCK.locked():
                             time.sleep(0.5)
                             continue
                         png_data = svg_to_png_bytes_threadsafe(path)
                         img = Image.open(io.BytesIO(png_data))
-                        self.svg_cache[filename] = img
+                        self.svg_cache[path] = img
                     except Exception:
                         pass
             time.sleep(3)
@@ -271,7 +300,7 @@ class SVGEditor(TkinterDnD.Tk):
         self.canvas.delete("all")
         self.canvas.create_image(offset_x, offset_y, anchor="nw", image=self.svg_tk_img)
 
-    # ---------------- Drag & Drop a změna obrázku ----------------
+    # ---------------- Drag & Drop a obrázky ----------------
     def start_drag(self, event):
         self.drag_data["x"], self.drag_data["y"] = event.x, event.y
 
@@ -338,18 +367,14 @@ class SVGEditor(TkinterDnD.Tk):
             self.load_dropped_image(img_path)
 
     def open_in_inkscape(self):
-        if not hasattr(self, "current_svg_path") or not os.path.exists(self.current_svg_path):
+        if not hasattr(self, "current_svg_path") or not self.current_svg_path.exists():
             messagebox.showerror("Chyba", "Žádný SVG soubor k otevření")
-            return
-        if not INKSCAPE_PATH.exists():
-            messagebox.showerror("Chyba", f"Inkscape nebyl nalezen: {INKSCAPE_PATH}")
             return
         try:
             subprocess.Popen([str(INKSCAPE_PATH), str(self.current_svg_path)])
         except Exception as e:
             messagebox.showerror("Chyba", f"Nepodařilo se otevřít Inkscape: {e}")
 
-    # ---------------- Uložení SVG ----------------
     def save_svg(self):
         if self.original_img is None:
             messagebox.showerror("Chyba", "Nejdříve vložte obrázek")
@@ -371,8 +396,8 @@ class SVGEditor(TkinterDnD.Tk):
             with tempfile.TemporaryDirectory() as tmpdir:
                 tmp_path = os.path.join(tmpdir, "image.png")
                 self.original_img.save(tmp_path)
-                replace_image_in_svg(self.tree, tmp_path, (rel_x, rel_y), (rel_w, rel_h))
-            self.tree.write(self.current_svg_path)
+                replace_image_in_svg(self.tree_xml, tmp_path, (rel_x, rel_y), (rel_w, rel_h))
+            self.tree_xml.write(self.current_svg_path)
             messagebox.showinfo("Hotovo", f"SVG uložen: {self.current_svg_path}")
             self.original_img = None
             for attr in ("canvas_image_id", "canvas_box_id"):
@@ -380,15 +405,14 @@ class SVGEditor(TkinterDnD.Tk):
                     self.canvas.delete(getattr(self, attr))
                     delattr(self, attr)
             
-            self.svg_cache.pop(self.svg_files[self.current_index], None)
-            self.load_svg(self.current_index)
+            self.svg_cache.pop(self.current_svg_path, None)
+            self.load_svg_by_path(self.current_svg_path)
         except Exception as e:
             messagebox.showerror("Chyba", str(e))
 
     def on_close(self):
         self.stop_preloader.set()
         self.destroy()
-
 
 if __name__ == "__main__":
     app = SVGEditor()
