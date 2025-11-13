@@ -1,21 +1,20 @@
 {
-    "generator": {
-        "rozměr_karty": "63x88mm",
-        "barvy": "RGS"
-    },
-    "editor": {
-        "font": "Arial",
-        "velikost": 12
-    },
-    "prevod": {
-        "formát": "PNG"
-    },
-    "tisk": {
-        "printer": "HP_LaserJet",
-        "duplex": false
-    },
-    "zdroje": {
-        "excel": "karty.xlsx",
-        "sablona": "sablona_Bezna.svg"
-    }
+  "generator": {
+    "rozměr_karty": "63x88mm",
+    "barvy": "RGB"
+  },
+  "editor": {
+    "alpha": 0.75
+  },
+  "prevod": {
+    "formát": "PNG"
+  },
+  "tisk": {
+    "printer": "HP_LaserJet",
+    "duplex": 1
+  },
+  "zdroje": {
+    "excel": "",
+    "sablona": ""
+  }
 }

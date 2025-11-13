@@ -19,7 +19,7 @@ PROJECTS_DIR.mkdir(exist_ok=True)
 
 DEFAULT_CONFIG = {
     "generator": {"rozměr_karty": "63x88mm", "barvy": "RGB"},
-    "editor": {"font": "Arial", "velikost": 12},
+    "editor": {"alpha": "1"},
     "prevod": {"formát": "PNG"},
     "tisk": {"printer": "HP_LaserJet", "duplex": True},
     "zdroje": {"excel": "", "sablona": ""}
