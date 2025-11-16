@@ -18,10 +18,8 @@ SRC_DIR.mkdir(exist_ok=True)
 PROJECTS_DIR.mkdir(exist_ok=True)
 
 DEFAULT_CONFIG = {
-    "generator": {"rozměr_karty": "63x88mm", "barvy": "RGB"},
-    "editor": {"alpha": "1"},
-    "prevod": {"formát": "PNG"},
-    "tisk": {"printer": "HP_LaserJet", "duplex": True},
+    "generator": {"RozmerKarty": "63x88mm"},
+    "editor": {"Pruhledost": "1", "PopisekKdeJeMaska":"OBRAZEK"},
     "zdroje": {"excel": "", "sablona": ""}
 }
 
@@ -283,7 +281,8 @@ class ScriptGUI:
                 [sys.executable, script, str(project_path)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                text=True
+                text=True,
+                encoding='utf-8'
             )
             for line in process.stdout:
                 self._write_console(f"[{datetime.now().strftime('%H:%M:%S')}] {name}: {line.strip()}", bold_time=True)
@@ -332,4 +331,3 @@ if __name__ == "__main__":
         app = ScriptGUI(root, project_name)
         root.geometry("850x450")
         root.mainloop()
-

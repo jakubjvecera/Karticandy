@@ -12,6 +12,7 @@ from tkinterdnd2 import DND_FILES, TkinterDnD
 from PIL import Image, ImageTk
 import lxml.etree as ET
 import subprocess
+import shutil
 from pathlib import Path
 import base64
 
@@ -23,11 +24,18 @@ if len(sys.argv) < 2:
 PROJECT_PATH = Path(sys.argv[1])
 OUTPUT_FOLDER = PROJECT_PATH / "vystup" / "vystup_svg"
 DATA_FOLDER = PROJECT_PATH / "data"
+EDITED_SVG_FOLDER = PROJECT_PATH / "vystup" / "vystup_editedsvg"
+INKSCAPE_EDIT_FOLDER = DATA_FOLDER / "editorinkscape"
+INKSCAPE_WATCH_STATE_FILE = DATA_FOLDER / "inkscape_watch.json"
 DATA_FOLDER.mkdir(parents=True, exist_ok=True)
+EDITED_SVG_FOLDER.mkdir(parents=True, exist_ok=True)
+INKSCAPE_EDIT_FOLDER.mkdir(parents=True, exist_ok=True)
+
 
 if not OUTPUT_FOLDER.exists():
     print(f"Složka se SVG soubory neexistuje: {OUTPUT_FOLDER}")
     sys.exit(1)
+
 
 # --- Najdi Inkscape (portable) ---
 if getattr(sys, 'frozen', False):
@@ -45,7 +53,8 @@ if not INKSCAPE_PATH.exists():
 NS = {
     'svg': "http://www.w3.org/2000/svg",
     'inkscape': "http://www.inkscape.org/namespaces/inkscape",
-    'xlink': "http://www.w3.org/1999/xlink"
+    'xlink': "http://www.w3.org/1999/xlink",
+    'sodipodi': "http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
 }
 
 # --- lock pro Inkscape (jedno volání najednou) ---
@@ -87,14 +96,19 @@ def parse_svg_length(value):
     except Exception:
         return 0.0
 
-def replace_image_in_svg(tree, new_image_path, pos, size):
+def replace_image_in_svg(tree, new_image_path, pos, size, image_mask_label: str):
     root = tree.getroot()
-    group = root.find('.//svg:g[@inkscape:label="OBRAZEK"]', NS)
+    group = None
+    # Zkusíme najít skupinu podle různých běžných atributů pro popisky
+    for attr in ["id", "inkscape:label", "sodipodi:label", "label"]:
+        group = root.find(f".//svg:g[@{attr}='{image_mask_label}']", NS)
+        if group is not None:
+            break
     if group is None:
-        raise ValueError("Skupina s label 'OBRAZEK' nebyla nalezena")
+        raise ValueError(f"Skupina s popiskem '{image_mask_label}' nebyla nalezena")
     image_el = group.find('.//svg:image', NS)
     if image_el is None:
-        raise ValueError("Element <image> nebyl nalezen ve skupině OBRAZEK")
+        raise ValueError(f"Element <image> nebyl nalezen ve skupině '{image_mask_label}'")
 
     img_data = Path(new_image_path).read_bytes()
     mime = "image/jpeg" if new_image_path.lower().endswith((".jpg", ".jpeg")) else "image/png"
@@ -123,16 +137,6 @@ class SVGEditor(TkinterDnD.Tk):
         self.root = None
         self.tree_xml = None
 
-        # saved files (green)
-        self.saved_files_path = DATA_FOLDER / "saved_files.json"
-        self.saved_files = set()
-        if self.saved_files_path.exists():
-            try:
-                with open(self.saved_files_path, "r", encoding="utf-8") as f:
-                    self.saved_files = set(Path(p) for p in json.load(f))
-            except Exception:
-                self.saved_files = set()
-
         # marked files (red)
         self.marked_files_path = DATA_FOLDER / "marked_files.json"
         self.marked_files = set()
@@ -144,11 +148,11 @@ class SVGEditor(TkinterDnD.Tk):
                 self.marked_files = set()
 
         # canvas images
-        self.original_img = None
-        self.tk_img = None
-        self.svg_tk_img = None
+        self.original_img = None            # PIL image (plná kvalita)
+        self.tk_img = None                  # aktuální PhotoImage zobrazený v canvasu
+        self.svg_tk_img = None              # náhled SVG
         self.image_pos = (0, 0)
-        self.image_size = (0, 0)
+        self.image_size = (0, 0)            # velikost v pixelech na canvasu (floaty OK)
         self.canvas_offset = (0, 0)
         self.canvas_scale = 1.0
         self.drag_data = {"x": 0, "y": 0}
@@ -156,10 +160,54 @@ class SVGEditor(TkinterDnD.Tk):
         # opacity
         self.opacity_var = tk.DoubleVar(value=1.0)
 
-        # preloader
+        # Načtení konfigurace
+        self.config = {}
+        config_path = PROJECT_PATH / "config.json"
+        if config_path.exists():
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    self.config = json.load(f)
+            except (json.JSONDecodeError, ValueError, TypeError):
+                pass # Pokud je soubor poškozený, použijí se výchozí hodnoty
+
+        self.image_mask_label = self.config.get("editor", {}).get("PopisekKdeJeMaska", "OBRAZEK")
+
+        # Načtení poslední hodnoty opacity z configu
+        config_path = PROJECT_PATH / "config.json"
+        if config_path.exists():
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config_data = json.load(f)
+                last_alpha = config_data.get("editor", {}).get("alpha")
+                if last_alpha is not None:
+                    self.opacity_var.set(float(last_alpha))
+            except (json.JSONDecodeError, ValueError, TypeError):
+                # Pokud je soubor poškozený nebo hodnota neplatná, použije se výchozí 1.0
+                pass
+
+
+        # debounce id pro ukládání alpha do configu
+        self._alpha_save_after_id = None
+
+        # preloader a signál pro ukončení vláken
         self.stop_preloader = threading.Event()
         self.preloader_thread = threading.Thread(target=self.preload_loop, daemon=True)
         self.preloader_thread.start()
+
+        # Sledování souboru v Inkscape
+        self.inkscape_watch_file = None
+        if INKSCAPE_WATCH_STATE_FILE.exists():
+            try:
+                with open(INKSCAPE_WATCH_STATE_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    # Obnovíme Path objekty
+                    data["original_path"] = Path(data["original_path"])
+                    data["edit_path"] = Path(data["edit_path"])
+                    self.inkscape_watch_file = data
+            except Exception:
+                INKSCAPE_WATCH_STATE_FILE.unlink(missing_ok=True)
+        self.inkscape_watch_thread = threading.Thread(target=self.watch_inkscape_file_loop, daemon=True)
+        self.inkscape_watch_thread.start()
 
         # UI
         self.setup_ui()
@@ -178,6 +226,8 @@ class SVGEditor(TkinterDnD.Tk):
             self.bind(key, lambda e: self.save_svg())  # uložit SVG
         for key in ["v", "V"]:
             self.bind(key, lambda e: self.add_png())   # vložit PNG/JPG
+        for key in ["i", "I"]:
+            self.bind(key, lambda e: self.open_in_inkscape()) # otevřít v Inkscape
 
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
@@ -202,6 +252,7 @@ class SVGEditor(TkinterDnD.Tk):
         self.tree.tag_configure("selected_item", font=("Segoe UI", 10, "bold"))
         self.tree.tag_configure("saved_file", foreground="green")
         self.tree.tag_configure("marked_file", foreground="red")
+        self.tree.tag_configure("inkscape_edit_file", foreground="purple", font=("Segoe UI", 10, "bold"))
         self.tree.tag_configure("active_file", background="#cce5ff", font=("Segoe UI", 10, "bold"))
 
         self.saved_count_label = tk.Label(left_frame, text="")
@@ -232,9 +283,12 @@ class SVGEditor(TkinterDnD.Tk):
         self.mark_btn.pack(pady=10)
 
         tk.Label(right_frame, text="Průhlednost:").pack(pady=(10,0))
-        self.opacity_slider = tk.Scale(right_frame, from_=0.2, to=1, resolution=0.01,
-                                       orient=tk.HORIZONTAL, variable=self.opacity_var,
-                                       command=lambda v: self.update_image_opacity(v))
+        # slider teď volá update_image_opacity s write_config=True (uloží změnu do configu, debounce)
+        self.opacity_slider = tk.Scale(
+            right_frame, from_=0.2, to=1, resolution=0.01,
+            orient=tk.HORIZONTAL, variable=self.opacity_var,
+            command=lambda v: self.update_image_opacity(v, write_config=True)
+        )
         self.opacity_slider.pack(fill=tk.X, padx=5)
 
         self.open_inkscape_btn = tk.Button(right_frame, text="Otevřít v Inkscape", command=self.open_in_inkscape)
@@ -265,19 +319,27 @@ class SVGEditor(TkinterDnD.Tk):
             has_marked_in_cat = any(full_path in self.marked_files for _, full_path in files)
             for file, full_path in sorted(files):
                 tags = []
-                if full_path in self.saved_files:
-                    tags.append("saved_file")
-                if self.current_svg_path == full_path:
-                    tags.append("active_file")
+                rel_path = full_path.relative_to(OUTPUT_FOLDER)
+                inkscape_edit_path = INKSCAPE_EDIT_FOLDER / rel_path
+                edited_path = EDITED_SVG_FOLDER / rel_path
+                # Priorita barev: červená > fialová > zelená
                 if full_path in self.marked_files:
                     tags.append("marked_file")
+                elif inkscape_edit_path.exists():
+                    tags.append("inkscape_edit_file")
+                elif edited_path.exists():
+                    tags.append("saved_file")
+
+                if self.current_svg_path == full_path:
+                    tags.append("active_file")
                 self.tree.insert(cat_id, "end", text=file, values=[str(full_path)], tags=tuple(tags))
             if has_marked_in_cat:
                 self.tree.item(cat_id, tags=("marked_file",))
 
-        saved = len(self.saved_files)
+        # Spočítáme "uložené" soubory podle existence v EDITED_SVG_FOLDER
+        saved_count = sum(1 for f in self.svg_files if (EDITED_SVG_FOLDER / f.relative_to(OUTPUT_FOLDER)).exists())
         total = len(self.svg_files)
-        self.saved_count_label.config(text=f"Uloženo: {saved} / {total}")
+        self.saved_count_label.config(text=f"Uloženo: {saved_count} / {total}")
 
     def toggle_mark_file(self):
         if not hasattr(self, "current_svg_path") or self.current_svg_path is None:
@@ -292,7 +354,13 @@ class SVGEditor(TkinterDnD.Tk):
                 json.dump([str(p) for p in self.marked_files], f, ensure_ascii=False, indent=2)
         except Exception:
             pass
+        # Aktualizujeme strom a text tlačítka
         self.update_tree()
+        self.update_mark_button_text()
+
+    def update_mark_button_text(self):
+        is_marked = self.current_svg_path and self.current_svg_path in self.marked_files
+        self.mark_btn.config(text="Odznačit" if is_marked else "Označit")
 
     def on_tree_select(self, event):
         selected = self.tree.selection()
@@ -331,19 +399,27 @@ class SVGEditor(TkinterDnD.Tk):
         if path in self.svg_files:
             self.current_index = self.svg_files.index(path)
 
+        # Aktualizujeme text tlačítka pro označení
+        self.update_mark_button_text()
+
         self.canvas.delete("all")
         self.canvas.create_text(self.canvas.winfo_width() // 2, self.canvas.winfo_height() // 2,
                                 text="Načítám SVG...", font=("Arial", 20), fill="gray")
 
         def load_thread():
             try:
-                if path in self.svg_cache:
-                    img = self.svg_cache[path]
+                # Prioritně zkusíme načíst upravený soubor
+                edited_path = EDITED_SVG_FOLDER / path.relative_to(OUTPUT_FOLDER)
+                load_path = edited_path if edited_path.exists() else path
+
+                if load_path in self.svg_cache:
+                    img = self.svg_cache[load_path]
                 else:
-                    png_data = svg_to_png_bytes_threadsafe(path)
+                    png_data = svg_to_png_bytes_threadsafe(load_path)
                     img = Image.open(io.BytesIO(png_data)).convert("RGBA")
-                    self.svg_cache[path] = img
-                if path != self.loading_path:
+                    self.svg_cache[load_path] = img
+
+                if self.loading_path != path:
                     return
                 self.img = img
                 parser = ET.XMLParser(huge_tree=True)
@@ -372,6 +448,7 @@ class SVGEditor(TkinterDnD.Tk):
         self.canvas.delete("all")
         self.canvas.create_image(ox, oy, anchor="nw", image=self.svg_tk_img)
         if getattr(self, "original_img", None) is not None:
+            # při načtení SVG jen aplikuj existující vložený obrázek (neukládej config)
             self.load_dropped_image(None)
 
     def highlight_active_tree_item(self, path: Path):
@@ -406,53 +483,97 @@ class SVGEditor(TkinterDnD.Tk):
             self.image_pos = (self.image_pos[0]+dx, self.image_pos[1]+dy)
 
     def on_mouse_wheel(self, event):
+        """
+        Rychlé interaktivní zvětšení/zmenšení vloženého obrázku.
+        Provádí pouze jeden rychlý resize (BILINEAR) a aplikaci opacity.
+        NEVOLÁ ukládání configu.
+        """
         if getattr(self, "original_img", None) is None or not hasattr(self, "canvas_image_id"):
             return
+
+        # získej delta (Windows/macOS/Linux)
         delta = 0
         if hasattr(event, "delta"):
             delta = event.delta
-        elif event.num == 4:
-            delta = 120
-        elif event.num == 5:
-            delta = -120
-        scale_factor = 1.1 if delta > 0 else 0.9
-        self.image_size = (self.image_size[0]*scale_factor, self.image_size[1]*scale_factor)
-        img_resized = self.original_img.resize(
-            (max(1, int(self.image_size[0])), max(1, int(self.image_size[1]))),
-            Image.Resampling.LANCZOS
-        )
+        else:
+            # Button-4 / Button-5 (X11)
+            num = getattr(event, "num", None)
+            if num == 4:
+                delta = 120
+            elif num == 5:
+                delta = -120
+
+        # jemnější krok podle hodnoty delta
+        if abs(delta) >= 240:
+            step = 1.2 if delta > 0 else 0.8
+        elif abs(delta) >= 120:
+            step = 1.1 if delta > 0 else 0.9
+        else:
+            step = 1.05 if delta > 0 else 0.95
+
+        new_w = max(1, self.image_size[0] * step)
+        new_h = max(1, self.image_size[1] * step)
+        self.image_size = (new_w, new_h)
+
+        # rychlý resample pro interaktivitu (BILINEAR)
+        img = self.original_img
+        if img.mode != "RGBA":
+            img = img.convert("RGBA")
+        img_resized = img.resize((max(1, int(new_w)), max(1, int(new_h))), Image.Resampling.BILINEAR)
+
+        # aplikuj aktuální opacity (bez dalšího resamplu)
+        try:
+            opacity = max(0.2, float(self.opacity_var.get()))
+        except Exception:
+            opacity = 1.0
+        alpha = img_resized.split()[3].point(lambda p: int(p * opacity))
+        img_resized.putalpha(alpha)
+
         self.tk_img = ImageTk.PhotoImage(img_resized)
         self.canvas.itemconfig(self.canvas_image_id, image=self.tk_img)
+
+        # přesun/rámeček
         if hasattr(self, "canvas_box_id"):
             self.canvas.coords(
                 self.canvas_box_id,
-                self.image_pos[0], self.image_pos[1],
-                self.image_pos[0]+self.image_size[0], self.image_pos[1]+self.image_size[1]
+                int(self.image_pos[0]), int(self.image_pos[1]),
+                int(self.image_pos[0] + self.image_size[0]), int(self.image_pos[1] + self.image_size[1])
             )
-        # znovu použij aktuální opacity
-        self.update_image_opacity(self.opacity_var.get())
+
+        # NEUkládej config zde (wheel změny nevyžadují zápis)
+        # pokud chceš, aby se po dokončení zoomu prováděl kvalitnější resample, můžeš zde zavolat
+        # např. self._finalize_interactive_resize() - ale není nutné.
 
     def load_dropped_image(self, img_path=None):
         if img_path is not None:
             img = Image.open(img_path).convert("RGBA")
             self.original_img = img
         img = self.original_img
+        if img is None:
+            return
         self.image_size = img.size
         self.image_pos = (self.canvas_offset[0] + 50, self.canvas_offset[1] + 50)
         self.tk_img = ImageTk.PhotoImage(img)
         for attr in ("canvas_image_id", "canvas_box_id"):
             if hasattr(self, attr):
-                self.canvas.delete(getattr(self, attr))
+                try:
+                    self.canvas.delete(getattr(self, attr))
+                except Exception:
+                    pass
+                try:
+                    delattr(self, attr)
+                except Exception:
+                    pass
         self.canvas_image_id = self.canvas.create_image(
             self.image_pos[0], self.image_pos[1], anchor="nw", image=self.tk_img
         )
         self.canvas_box_id = self.canvas.create_rectangle(
-            self.image_pos[0], self.image_pos[1],
-            self.image_pos[0]+self.image_size[0], self.image_pos[1]+self.image_size[1],
+            int(self.image_pos[0]), int(self.image_pos[1]),
+            int(self.image_pos[0]+self.image_size[0]), int(self.image_pos[1]+self.image_size[1]),
             outline="red", width=2
         )
-        # aplikovat průhlednost
-        self.update_image_opacity(self.opacity_var.get())
+        # aplikovat průhlednost (neukládat config)
+        self.update_image_opacity(self.opacity_var.get(), write_config=False)
 
     def drop_file(self, event):
         files = self.tk.splitlist(event.data)
@@ -467,7 +588,11 @@ class SVGEditor(TkinterDnD.Tk):
             self.load_dropped_image(img_path)
 
     # ---------------- opacity ----------------
-    def update_image_opacity(self, value):
+    def update_image_opacity(self, value, write_config=False):
+        """
+        Přepočítá a zobrazí obraz podle opacity.
+        Pokud write_config==True, provede debounced uložení do config.json (pouze slider).
+        """
         if getattr(self, "original_img", None) is None or not hasattr(self, "canvas_image_id"):
             return
         try:
@@ -476,16 +601,38 @@ class SVGEditor(TkinterDnD.Tk):
             opacity = 1.0
         self.opacity_var.set(opacity)
 
+        # resize once podle self.image_size (pouze jednou)
         img = self.original_img.copy()
         if img.mode != "RGBA":
             img = img.convert("RGBA")
-        img = img.resize((max(1, int(self.image_size[0])), max(1, int(self.image_size[1]))), Image.Resampling.LANCZOS)
+        w = max(1, int(self.image_size[0]))
+        h = max(1, int(self.image_size[1]))
+        # kvalitní resize pro stabilní zobrazení - BILINEAR pro interaktivitu
+        img = img.resize((w, h), Image.Resampling.BILINEAR)
         alpha = img.split()[3].point(lambda p: int(p * opacity))
         img.putalpha(alpha)
         self.tk_img = ImageTk.PhotoImage(img)
         self.canvas.itemconfig(self.canvas_image_id, image=self.tk_img)
 
-        # --- uložit do config.json ---
+        # aktualizace rámečku
+        if hasattr(self, "canvas_box_id"):
+            self.canvas.coords(
+                self.canvas_box_id,
+                int(self.image_pos[0]), int(self.image_pos[1]),
+                int(self.image_pos[0] + self.image_size[0]), int(self.image_pos[1] + self.image_size[1])
+            )
+
+        # pokud má volání uložet config (slider), použij debounce
+        if write_config:
+            if self._alpha_save_after_id is not None:
+                try:
+                    self.after_cancel(self._alpha_save_after_id)
+                except Exception:
+                    pass
+            # po 300 ms od poslední změny zapíš config
+            self._alpha_save_after_id = self.after(300, self._save_alpha_to_config)
+
+    def _save_alpha_to_config(self):
         config_path = PROJECT_PATH / "config.json"
         config_data = {}
         if config_path.exists():
@@ -496,24 +643,92 @@ class SVGEditor(TkinterDnD.Tk):
                 config_data = {}
         if "editor" not in config_data:
             config_data["editor"] = {}
-        config_data["editor"]["alpha"] = opacity
+        config_data["editor"]["alpha"] = float(self.opacity_var.get())
         try:
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(config_data, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
+        # clear debounce id
+        self._alpha_save_after_id = None
 
     # ---------------- Inkscape ----------------
     def open_in_inkscape(self):
         if not hasattr(self, "current_svg_path") or not self.current_svg_path.exists():
             messagebox.showerror("Chyba", "Žádný SVG soubor k otevření")
             return
+
+        # Zjistíme, kterou verzi souboru otevřít (upravenou, nebo originál)
+        original_path = self.current_svg_path
+        rel_path = original_path.relative_to(OUTPUT_FOLDER)
+        edited_path = EDITED_SVG_FOLDER / rel_path
+        source_path = edited_path if edited_path.exists() else original_path
+
+        # Cílová cesta v dočasné složce
+        inkscape_dest_path = INKSCAPE_EDIT_FOLDER / rel_path
+
+        if self.inkscape_watch_file and self.inkscape_watch_file["edit_path"].exists():
+             messagebox.showwarning("Pozor", "Už je editován jiný soubor. Nejdříve ho zavřete v Inkscape.")
+             return
+
+        # Vyčistíme předchozí sledovaný soubor, pokud existuje
+        if self.inkscape_watch_file:
+            try:
+                self.inkscape_watch_file["edit_path"].unlink(missing_ok=True)
+            except OSError:
+                pass
+        INKSCAPE_WATCH_STATE_FILE.unlink(missing_ok=True)
+
         try:
-            subprocess.Popen([str(INKSCAPE_PATH), str(self.current_svg_path)])
+            # Vytvoříme adresáře a zkopírujeme soubor
+            inkscape_dest_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_path, inkscape_dest_path)
+ 
+            # Uložíme si informace pro sledování
+            watch_info = {
+                "original_path": original_path,
+                "edit_path": inkscape_dest_path,
+                "mtime": inkscape_dest_path.stat().st_mtime
+            }
+            self.inkscape_watch_file = watch_info
+
+            # Uložíme stav do JSON souboru pro případ restartu
+            with open(INKSCAPE_WATCH_STATE_FILE, "w", encoding="utf-8") as f:
+                # Uložíme cesty jako stringy
+                save_data = watch_info.copy()
+                save_data["original_path"] = str(save_data["original_path"])
+                save_data["edit_path"] = str(save_data["edit_path"])
+                json.dump(save_data, f, indent=2)
+
+            # Spustíme Inkscape
+            subprocess.Popen([str(INKSCAPE_PATH), str(inkscape_dest_path)])
+            self.update_tree()
         except Exception as e:
             messagebox.showerror("Chyba", f"Nepodařilo se otevřít Inkscape: {e}")
 
-    # ---------------- uložení SVG ----------------
+    def watch_inkscape_file_loop(self):
+        while not self.stop_preloader.is_set():
+            if self.inkscape_watch_file:
+                path = self.inkscape_watch_file["edit_path"]
+                if path.exists():
+                    try:
+                        current_mtime = path.stat().st_mtime
+                        if current_mtime > self.inkscape_watch_file["mtime"]:
+                            # Soubor se změnil!
+                            self.after(0, self.handle_inkscape_save)
+                    except FileNotFoundError:
+                        # Soubor byl mezitím smazán
+                        self.inkscape_watch_file = None
+                        INKSCAPE_WATCH_STATE_FILE.unlink(missing_ok=True)
+                        self.after(0, self.update_tree)
+                else:
+                    # Soubor už neexistuje
+                    self.inkscape_watch_file = None
+                    INKSCAPE_WATCH_STATE_FILE.unlink(missing_ok=True)
+                    self.after(0, self.update_tree)
+            time.sleep(1)
+
+    # ---------------- uložení SVG (z editoru) ----------------
     def save_svg(self):
         if getattr(self, "original_img", None) is None:
             messagebox.showerror("Chyba", "Nejdříve vložte obrázek")
@@ -535,21 +750,69 @@ class SVGEditor(TkinterDnD.Tk):
             with tempfile.TemporaryDirectory() as tmpdir:
                 tmp_path = os.path.join(tmpdir, "image.png")
                 self.original_img.save(tmp_path)
-                replace_image_in_svg(self.tree_xml, tmp_path, (rel_x, rel_y), (rel_w, rel_h))
-            self.tree_xml.write(self.current_svg_path)
-            self.saved_files.add(self.current_svg_path)
-            with open(self.saved_files_path, "w", encoding="utf-8") as f:
-                json.dump([str(p) for p in self.saved_files], f, ensure_ascii=False, indent=2)
+                replace_image_in_svg(self.tree_xml, tmp_path, (rel_x, rel_y), (rel_w, rel_h), self.image_mask_label)
+
+            # Uložíme do nové složky
+            save_path = EDITED_SVG_FOLDER / self.current_svg_path.relative_to(OUTPUT_FOLDER)
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            self.tree_xml.write(save_path, encoding="utf-8", xml_declaration=True)
+
             messagebox.showinfo("Hotovo", f"SVG uložen: {self.current_svg_path}")
             self.original_img = None
             for attr in ("canvas_image_id", "canvas_box_id"):
                 if hasattr(self, attr):
-                    self.canvas.delete(getattr(self, attr))
-                    delattr(self, attr)
+                    try:
+                        self.canvas.delete(getattr(self, attr))
+                    except Exception:
+                        pass
+                    try:
+                        delattr(self, attr)
+                    except Exception:
+                        pass
+            # Vyčistíme cache pro oba možné soubory (původní i upravený)
+            self.svg_cache.pop(save_path, None)
             self.svg_cache.pop(self.current_svg_path, None)
+
             self.load_svg_by_path(self.current_svg_path)
         except Exception as e:
             messagebox.showerror("Chyba při ukládání", str(e))
+
+    def handle_inkscape_save(self):
+        if not self.inkscape_watch_file:
+            return
+
+        watch_info = self.inkscape_watch_file.copy()
+        source_path = watch_info["edit_path"]
+        original_path = watch_info["original_path"]
+        rel_path = original_path.relative_to(OUTPUT_FOLDER)
+        dest_path = EDITED_SVG_FOLDER / rel_path
+
+        try:
+            # Zkopírujeme soubor, místo přesunu, aby mohl být dále upravován
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_path, dest_path)
+
+            # Aktualizujeme čas modifikace, abychom mohli sledovat další změny
+            new_mtime = source_path.stat().st_mtime
+            self.inkscape_watch_file["mtime"] = new_mtime
+
+            # Uložíme nový stav (s novým časem) do JSON souboru
+            with open(INKSCAPE_WATCH_STATE_FILE, "w", encoding="utf-8") as f:
+                save_data = self.inkscape_watch_file.copy()
+                save_data["original_path"] = str(save_data["original_path"])
+                save_data["edit_path"] = str(save_data["edit_path"])
+                json.dump(save_data, f, indent=2)
+
+            # Vyčistíme cache, aby se náhled načetl znovu
+            self.svg_cache.pop(dest_path, None)
+            self.svg_cache.pop(original_path, None)
+            # Pokud je to aktuálně zobrazený soubor, načteme ho znovu
+            if self.current_svg_path == original_path:
+                self.load_svg_by_path(original_path)
+        except Exception as e:
+            messagebox.showerror("Chyba", f"Nepodařilo se zpracovat uložený soubor z Inkscape: {e}")
+        finally:
+            self.update_tree()
 
     # ---------------- preloader ----------------
     def preload_loop(self):
@@ -559,30 +822,46 @@ class SVGEditor(TkinterDnD.Tk):
                 continue
             current = getattr(self, "current_index", 0)
             indices = [(current - i) % len(self.svg_files) for i in range(3,0,-1)] + \
-                      [(current + i) % len(self.svg_files) for i in range(0,6)]
+                        [(current + i) % len(self.svg_files) for i in range(0,6)]
             for idx in indices:
                 if self.stop_preloader.is_set():
                     return
-                path = self.svg_files[idx]
-                if path not in self.svg_cache:
+                original_path = self.svg_files[idx]
+                edited_path = EDITED_SVG_FOLDER / original_path.relative_to(OUTPUT_FOLDER)
+                load_path = edited_path if edited_path.exists() else original_path
+    
+                if load_path not in self.svg_cache:
                     try:
                         if INKSCAPE_LOCK.locked():
                             time.sleep(0.1)
                             continue
-                        png_data = svg_to_png_bytes_threadsafe(path)
+                        png_data = svg_to_png_bytes_threadsafe(load_path)
                         img = Image.open(io.BytesIO(png_data)).convert("RGBA")
-                        self.svg_cache[path] = img
+                        self.svg_cache[load_path] = img
                     except Exception:
                         pass
             time.sleep(1)
-
+    
     # ---------------- ukončení ----------------
     def on_close(self):
         self.stop_preloader.set()
+        # cancel pending alpha save
+        if self._alpha_save_after_id is not None:
+            try:
+                self.after_cancel(self._alpha_save_after_id)
+            except Exception:
+                pass
+
+        # Při zavření smažeme dočasný soubor a stav
+        if self.inkscape_watch_file:
+            try:
+                self.inkscape_watch_file["edit_path"].unlink(missing_ok=True)
+            except OSError:
+                pass
+        INKSCAPE_WATCH_STATE_FILE.unlink(missing_ok=True)
         self.destroy()
 
 # ---------------- spustit ----------------
 if __name__ == "__main__":
     app = SVGEditor()
     app.mainloop()
-

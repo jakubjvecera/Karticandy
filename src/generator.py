@@ -6,7 +6,6 @@ import unicodedata
 import re
 import sys
 import json
-
 # ---------------- Funkce ----------------
 
 def odstranit_diakritiku(text):
@@ -156,4 +155,3 @@ for index, row in df.iterrows():
         continue
 
 print("Hotovo!")
-

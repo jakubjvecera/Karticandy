@@ -4,7 +4,7 @@
     "barvy": "RGB"
   },
   "editor": {
-    "alpha": 0.75
+    "alpha": 0.49
   },
   "prevod": {
     "formát": "PNG"
@@ -14,7 +14,7 @@
     "duplex": 1
   },
   "zdroje": {
-    "excel": "",
-    "sablona": ""
+    "excel": "karty.xlsx",
+    "sablona": "sablona_Bezna.svg"
   }
 }

@@ -1,20 +1,49 @@
 # -*- coding: utf-8 -*-
 import pandas as pd
 import math
+import sys
+import json
 import unicodedata
 from pathlib import Path
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from PyPDF2 import PdfReader, PdfWriter
+import io
+ 
+# ---------------- Cesta k projektu ----------------
+if len(sys.argv) < 2:
+    print("Nebyla předána cesta k projektu.")
+    sys.exit(1)
+ 
+PROJECT_PATH = Path(sys.argv[1])
+SCRIPT_DIR = Path(__file__).parent
+DATA_DIR = PROJECT_PATH / "data"
+OUTPUT_DIR = PROJECT_PATH / "vystup"
+PNG_ROOT = OUTPUT_DIR / "vystup_png"
+OUTPUT_PDF = OUTPUT_DIR / "karty_pro_tisk.pdf"
+FINAL_PDF = OUTPUT_DIR / "karty_pro_tisk_oboustranne.pdf"
+ 
+config_path = PROJECT_PATH / "config.json"
+if not config_path.exists():
+    print(f"Chybí config soubor: {config_path}")
+    sys.exit(1)
+ 
+with open(config_path, "r", encoding="utf-8") as f:
+    config = json.load(f)
+ 
+EXCEL_FILE = DATA_DIR / config["zdroje"].get("excel", "")
+ 
+# --- Získání rozměrů karty z configu ---
+rozmer_karty_str = config.get("generator", {}).get("RozmerKarty", "63.5x88.9mm")
+try:
+    w_str, h_str = rozmer_karty_str.lower().replace("mm", "").split('x')
+    CARD_W_MM, CARD_H_MM = float(w_str), float(h_str)
+    print(f"Načteny rozměry karty z configu: {CARD_W_MM}x{CARD_H_MM} mm")
+except (ValueError, IndexError):
+    CARD_W_MM, CARD_H_MM = 63.5, 88.9
+    print(f"Nepodařilo se načíst rozměry karty z configu, použity výchozí: {CARD_W_MM}x{CARD_H_MM} mm")
 
-# --- Nastavení ---
-EXCEL_FILE = Path("karty.xlsx")
-PNG_ROOT   = Path("vystup_png")
-OUTPUT_PDF = Path("karty_tisk.pdf")
-FINAL_PDF  = Path("karty_tisk_oboustranne.pdf")
-
-CARD_W_MM, CARD_H_MM = 63.5, 88.9
 MARGIN_MM = 7
 GAP_MM    = 2
 
@@ -34,47 +63,47 @@ def clean_filename(name: str) -> str:
     only_ascii = nfkd_form.encode('ASCII', 'ignore').decode('ASCII')
     return only_ascii.replace(' ', '_')
 
-def find_rarity_dir(vzacnost: str) -> Path:
-    vz = vzacnost.strip().lower()
-    for d in PNG_ROOT.iterdir():
-        if d.is_dir() and d.name.lower() == vz:
-            return d
-    return None
-
 def create_print_pdf():
     """Vytvoří PDF s lícovými stranami karet."""
-    df = pd.read_excel(EXCEL_FILE)
+    if not EXCEL_FILE.exists():
+        print(f"Excel soubor '{EXCEL_FILE}' nenalezen.")
+        return
+
+    df = pd.read_excel(str(EXCEL_FILE))
     df = df.sort_values(["Vzacnost", "Nazev"])
     c = canvas.Canvas(str(OUTPUT_PDF), pagesize=A4)
 
     for vzacnost, group in df.groupby("Vzacnost"):
-        placed = 0
-        rar_dir = find_rarity_dir(vzacnost)
-        if not rar_dir:
-            print(f"⚠️ Podadresar pro vzácnost '{vzacnost}' nenalezen.")
-            continue
-
+        placed_in_group = 0
         for _, row in group.iterrows():
             nazev_raw = row.get("Nazev", "")
             nazev = str(nazev_raw).strip()
+            kategorie = str(row.get("Kategorie", "")).strip()
             pocet = row.get("Pocet", 1)
             try:
                 pocet = int(pocet) if not math.isnan(pocet) else 1
             except:
                 pocet = 1
 
-            png_file = rar_dir / f"{clean_filename(nazev)}.png"
+            clean_name = f"{clean_filename(nazev)}.png"
+
+            # 1. Hledání v hlavní složce (upravené)
+            png_file = PNG_ROOT / kategorie / clean_name
+            # 2. Pokud nenalezeno, hledání v podsložce 'unedited'
             if not png_file.exists():
-                print(f"⚠️ Chybí PNG pro kartu: {png_file}")
+                png_file = PNG_ROOT / "unedited" / kategorie / clean_name
+
+            if not png_file.exists():
+                print(f"Chybí PNG pro kartu '{nazev}' v kategorii '{kategorie}'. Hledáno v obou složkách.")
                 continue
 
             for _ in range(pocet):
-                if placed and placed % PER_PAGE == 0:
+                if placed_in_group and placed_in_group % PER_PAGE == 0:
                     c.showPage()
-                    placed = 0
+                    placed_in_group = 0
 
-                col = placed % COLS
-                row_i = placed // COLS
+                col = placed_in_group % COLS
+                row_i = placed_in_group // COLS
 
                 x = mm2pt(MARGIN_MM + col * (CARD_W_MM + GAP_MM))
                 y = PAGE_H - mm2pt(MARGIN_MM + (row_i + 1) * CARD_H_MM + row_i * GAP_MM)
@@ -82,16 +111,23 @@ def create_print_pdf():
                 c.drawImage(str(png_file), x, y,
                             width=CARD_W, height=CARD_H,
                             preserveAspectRatio=True, anchor="sw")
-                placed += 1
+                placed_in_group += 1
 
-        c.showPage()  # nová strana po dokončení vzácnosti
+        # Po dokončení všech karet jedné vzácnosti vždy ukončíme stránku,
+        # aby další vzácnost začala na nové.
+        if placed_in_group > 0:
+            c.showPage()
 
     c.save()
-    print(f"✅ Lícové PDF vytvořeno: {OUTPUT_PDF}")
+    print(f"Lícové PDF vytvořeno: {OUTPUT_PDF}")
 
 def create_backed_pdf():
     """Za každou stránku líců vloží rub odpovídající vzácnosti stránky."""
-    df = pd.read_excel(EXCEL_FILE)
+    if not EXCEL_FILE.exists():
+        print(f"Excel soubor '{EXCEL_FILE}' nenalezen.")
+        return
+
+    df = pd.read_excel(str(EXCEL_FILE))
     df = df.sort_values(["Vzacnost", "Nazev"])
 
     # spočítáme počet stránek pro každou vzácnost
@@ -105,26 +141,25 @@ def create_backed_pdf():
     writer = PdfWriter()
 
     if len(rarity_pages) != len(reader.pages):
-        print(f"⚠️ Počet stránek a vzácností nesedí, použiji minimum")
+        print(f"Počet stránek a vzácností nesedí, použiji minimum")
         rarity_pages = rarity_pages[:len(reader.pages)]
 
     for i, page in enumerate(reader.pages):
         vzacnost = rarity_pages[i]
         writer.add_page(page)  # líc
 
-        back_pdf = Path(f"{vzacnost}.pdf")
+        back_pdf = SCRIPT_DIR / f"{clean_filename(vzacnost)}.pdf"
         if back_pdf.exists():
             back_reader = PdfReader(back_pdf)
             writer.add_page(back_reader.pages[0])  # rub
         else:
-            print(f"⚠️ Rubový PDF pro '{vzacnost}' nenalezen, pokračuji bez něj.")
+            print(f"Rubový PDF pro '{vzacnost}' nenalezen (hledáno v {back_pdf}), pokračuji bez něj.")
 
     with open(FINAL_PDF, "wb") as f:
         writer.write(f)
 
-    print(f"✅ Oboustranné PDF vytvořeno: {FINAL_PDF}")
+    print(f"Oboustranné PDF vytvořeno: {FINAL_PDF}")
 
 if __name__ == "__main__":
     create_print_pdf()    # vytvoří lícové PDF
     create_backed_pdf()   # vloží ruby za každou stránku
-
