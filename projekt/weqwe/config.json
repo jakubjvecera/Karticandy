@@ -1,0 +1,13 @@
+{
+    "generator": {
+        "RozmerKarty": "63x88mm"
+    },
+    "editor": {
+        "Pruhledost": "1",
+        "PopisekKdeJeMaska": "OBRAZEK"
+    },
+    "zdroje": {
+        "excel": "",
+        "sablona": ""
+    }
+}

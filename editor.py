@@ -387,10 +387,11 @@ class SVGEditor(TkinterDnD.Tk):
 
     def on_close(self):
         self.stop_preloader.set()
+        print("Hotovo!")
+        sys.stdout.flush()
         self.destroy()
 
 
 if __name__ == "__main__":
     app = SVGEditor()
     app.mainloop()
-

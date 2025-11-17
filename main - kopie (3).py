@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import tkinter as tk
-import locale # Import pro zjištění systémového kódování
+import locale
 from tkinter import ttk
 from tkinter import messagebox, simpledialog, filedialog
 import subprocess
@@ -14,18 +14,17 @@ import sys
 from pathlib import Path
 
 # ---------------- Constants ----------------
-PROJECTS_DIR = Path("projekty")
+PROJECTS_DIR = Path("projekt")
 SRC_DIR = Path("src")
 
 # Ensure base directories exist
-for path in [SRC_DIR, PROJECTS_DIR]: # SRC_DIR je již definováno, není třeba znovu
+for path in [SRC_DIR, PROJECTS_DIR]:
     path.mkdir(exist_ok=True)
 
 DEFAULT_CONFIG = {
-    "generator": {"RozmerKarty": "63.5x88.9mm"},
-    "editor": {"alpha": "0.8", "PopisekKdeJeMaska":"OBRAZEK"},
-    "zdroje": {"excel": "", "sablona": ""},
-    "last_completed_script": "" # Nový klíč pro sledování průběhu
+    "generator": {"RozmerKarty": "63x88mm"},
+    "editor": {"Pruhledost": "1", "PopisekKdeJeMaska":"OBRAZEK"},
+    "zdroje": {"excel": "", "sablona": ""}
 }
 
 BUTTON_ORDER = ["Generator", "Editor", "Prevod", "Tisk"]
@@ -38,7 +37,7 @@ for py_file in SRC_DIR.glob("*.py"):
     SCRIPTS[py_file.stem.lower()] = str(py_file)
 
 # ---------------- Pomocné okno pro výběr projektu ----------------
-def select_project_window(root):
+def select_project_dialog(root):
     PROJECTS_DIR.mkdir(exist_ok=True)
     projects = [d.name for d in PROJECTS_DIR.iterdir() if d.is_dir()]
 
@@ -87,7 +86,7 @@ def select_project_window(root):
 class ScriptGUI:
     def __init__(self, root, current_project):
         self.root = root
-        self.root.title("Nástroj pro tvorbu karet")
+        self.root.title("Kartičandy")
         self.current_project = current_project
         self._display_to_stem = {}
 
@@ -107,7 +106,6 @@ class ScriptGUI:
         self.running_times = {}
         self.is_script_running = False
 
-        self.script_order = [s.lower() for s in BUTTON_ORDER] # Pro snadnější porovnání
         # Add buttons exactly according to BUTTON_ORDER
         self._add_all_buttons(top_frame)
 
@@ -118,8 +116,6 @@ class ScriptGUI:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.console.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.console.tag_configure("bold_time", font=("Arial", 10, "bold"))
-
-        self._update_button_states_based_on_progress() # Nastaví počáteční stav tlačítek
 
         # Status bar
         self.status_bar = tk.Label(root, text=f"Aktuální projekt: {self.current_project}", bd=1, relief=tk.SUNKEN, anchor=tk.W, font=("Arial", 10, "italic"))
@@ -251,8 +247,6 @@ class ScriptGUI:
             if section == "zdroje":
                 continue
             for key, value in config[section].items():
-                if key == "alpha": # Skryjeme pole pro průhlednost v GUI
-                    continue
                 add_field(section, key, value)
 
         def save_config():
@@ -275,81 +269,17 @@ class ScriptGUI:
         for btn in self.buttons.values():
             btn.config(state=state)
 
-    def _get_current_script_progress(self):
-        """Načte název posledního úspěšně dokončeného skriptu z config.json."""
-        project_path = PROJECTS_DIR / self.current_project
-        config_path = project_path / "config.json"
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                config = json.load(f)
-            return config.get("last_completed_script", "")
-        except (FileNotFoundError, json.JSONDecodeError):
-            return "" # Pokud config neexistuje nebo je neplatný, předpokládáme žádný průběh
-
-    def _update_script_progress(self, script_name):
-        """Uloží název úspěšně dokončeného skriptu do config.json."""
-        project_path = PROJECTS_DIR / self.current_project
-        config_path = project_path / "config.json"
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                config = json.load(f)
-            config["last_completed_script"] = script_name
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(config, f, indent=4, ensure_ascii=False)
-        except (FileNotFoundError, json.JSONDecodeError) as e:
-            self._write_console(f"Chyba při aktualizaci průběhu skriptu: {e}")
-
-    def _update_button_states_based_on_progress(self):
-        """Nastaví stav tlačítek na základě posledního dokončeného skriptu."""
-        last_completed = self._get_current_script_progress().lower()
-        
-        if last_completed == "tisk":
-            # Pokud je Tisk dokončen, všechny skripty jsou považovány za dokončené pro tuto sekvenci
-            for stem in self.buttons:
-                self.buttons[stem].config(state='disabled')
-            return
-
-        current_index = -1
-        if last_completed in self.script_order:
-            current_index = self.script_order.index(last_completed)
-
-        for i, display_name in enumerate(BUTTON_ORDER):
-            stem = display_name.lower()
-            if stem in self.buttons:
-                # Povolí Generátor, pokud ještě žádný skript nebyl dokončen
-                # Nebo povolí další skript v pořadí
-                if (current_index == -1 and i == 0) or (i == current_index + 1):
-                    self.buttons[stem].config(state='normal')
-                else:
-                    self.buttons[stem].config(state='disabled')
-
     # ---------------- Script execution ----------------
     def confirm_and_run(self, name):
         if self.is_script_running:
             messagebox.showwarning("Zaneprázdněn", "Jiný skript právě běží. Počkejte na jeho dokončení.")
             return
-        # Kontrola, zda jsou vyplněny zdroje
-        project_path = PROJECTS_DIR / self.current_project
-        config_path = project_path / "config.json"
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                config = json.load(f)
-            zdroje = config.get("zdroje", {})
-            if not zdroje.get("excel") or not zdroje.get("sablona"):
-                messagebox.showerror("Chybějící zdroje", "Nejdříve musíte nastavit zdroje projektu.")
-                return
-        except (FileNotFoundError, json.JSONDecodeError) as e:
-            messagebox.showerror("Chyba konfigurace", f"Nepodařilo se načíst konfigurační soubor: {e}")
-            return
-
         if messagebox.askyesno("Potvrzení", f"Opravdu spustit {name.capitalize()}?"):
             self.run_script(name)
 
     def run_script(self, name):
         self.is_script_running = True
-        # Zakáže všechna tlačítka, aby se zabránilo spuštění dalších skriptů během běhu
-        for btn_stem in self.buttons:
-            self.buttons[btn_stem].config(state='disabled')
+        self._set_buttons_state('disabled')
         self.running_times[name] = time.time()
         if name not in self.time_labels:
             time_label = tk.Label(self.buttons[name].master, text="00:00:00", font=("Arial", 10))
@@ -357,7 +287,7 @@ class ScriptGUI:
             self.time_labels[name] = time_label
 
         self._write_console(f"[{datetime.now().strftime('%H:%M:%S')}] {name.capitalize()} spuštěn", bold_time=True)
-        threading.Thread(target=self._execute_script, args=(name,), daemon=True).start() # Spustí skript v samostatném vlákně
+        threading.Thread(target=self._execute_script, args=(name,), daemon=True).start()
         self._update_time_label(name)
 
     def _execute_script(self, name):
@@ -373,10 +303,10 @@ class ScriptGUI:
                 errors='replace' # Případné chyby v kódování nahradíme
             )
             for line in process.stdout:
-                self._write_console(f"\t {line.strip()}")
+                self._write_console(f"[{datetime.now().strftime('%H:%M:%S')}] {name}: {line.strip()}", bold_time=True)
             process.wait()
         except Exception as e:
-            self._write_console(f"\t Chyba při spuštění: {e}")
+            self._write_console(f"[{datetime.now().strftime('%H:%M:%S')}] {name}: Chyba při spuštění: {e}", bold_time=True)
         finally:
             self.is_script_running = False
             start_time = self.running_times.pop(name, time.time())
@@ -384,7 +314,7 @@ class ScriptGUI:
             if name in self.time_labels:
                 self.time_labels[name].destroy()
                 del self.time_labels[name]
-            self._write_console(f"{name.capitalize()} dokončen, běžel {elapsed:.2f} s")
+            self._write_console(f"[{datetime.now().strftime('%H:%M:%S')}] {name.capitalize()} dokončen, běžel {elapsed:.2f} s", bold_time=True)
             self._write_console("")
             self._set_buttons_state('normal')
 
@@ -404,7 +334,7 @@ class ScriptGUI:
             self.console.insert(tk.END, text[:closing_bracket], "bold_time")
             self.console.insert(tk.END, text[closing_bracket:] + "\n")
         else:
-            self.console.insert(tk.END, f"{text}\n")
+            self.console.insert(tk.END, text + "\n")
         self.console.see(tk.END)
         self.console.configure(state='disabled')
 
@@ -412,7 +342,7 @@ class ScriptGUI:
 if __name__ == "__main__":
     root = tk.Tk()
     root.withdraw()
-    project_name = select_project_window(root)
+    project_name = select_project_dialog(root)
     if not project_name:
         messagebox.showerror("Chyba", "Nebyl vybrán žádný projekt.")
     else:

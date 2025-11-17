@@ -65,7 +65,7 @@ if not sablona_file.exists():
 try:
     df = pd.read_excel(excel_file)
 except Exception as e:
-    print(f"Chyba při načítání Excel souboru: {e}")
+    print(f"Zdroje nejsou přidány: {e}")
     sys.exit(1)
 
 # ---------------- SVG nastavení ----------------
@@ -92,7 +92,7 @@ for index, row in df.iterrows():
         tree = ET.parse(sablona_file)
         root = tree.getroot()
     except ET.ParseError as e:
-        print(f"Chyba při načítání SVG šablony: {e}")
+        print(f"Zdroje nejsou přidány: {e}")
         continue
 
     # Nahrazení placeholderů podle názvů sloupců
@@ -121,7 +121,7 @@ for index, row in df.iterrows():
             for vnoreny in cilova.findall(".//svg:g", namespaces):
                 set_display(vnoreny, "inline")
         else:
-            print(f"Varování: Kategorie '{aktualni_kategorie}' nebyla nalezena v šabloně.")
+            print(f"Kategorie '{aktualni_kategorie}' nebyla nalezena v šabloně")
 
     # --- Vzácnost ---
     vzacnost_skupiny = []
@@ -136,15 +136,11 @@ for index, row in df.iterrows():
         if cilova is not None:
             set_display(cilova, "inline")
         else:
-            print(f"Varování: Vzácnost '{aktualni_vzacnost}' nebyla nalezena v šabloně.")
+            print(f"Vzacnost '{aktualni_vzacnost}' nebyla nalezena v šabloně")
 
-    # ---------------- Uložení výstupu ----------------
+    # ---------------- Uložení výstupu do podsložky podle kategorie ----------------
     aktualni_kategorie = str(row["Kategorie"]).strip()
-    if not aktualni_kategorie:
-        print(f"Varování: Karta '{row['Nazev']}' nemá kategorii, ukládám do kořenové složky výstupu.")
-        cilova_slozka = vystup_svg_dir
-    else:
-        cilova_slozka = vystup_svg_dir / aktualni_kategorie
+    cilova_slozka = vystup_svg_dir / aktualni_kategorie
     cilova_slozka.mkdir(exist_ok=True)
 
     nazev_karty = odstranit_diakritiku(row["Nazev"]).strip().replace(" ", "_")

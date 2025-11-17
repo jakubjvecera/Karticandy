@@ -94,7 +94,7 @@ def create_print_pdf():
                 png_file = PNG_ROOT / "unedited" / kategorie / clean_name
 
             if not png_file.exists():
-                print(f"Varování: Chybí PNG pro kartu '{nazev}' v kategorii '{kategorie}'. Karta nebude v PDF.")
+                print(f"Chybí PNG pro kartu '{nazev}' v kategorii '{kategorie}'. Hledáno v obou složkách.")
                 continue
 
             for _ in range(pocet):
@@ -149,11 +149,11 @@ def create_backed_pdf():
         writer.add_page(page)  # líc
 
         back_pdf = SCRIPT_DIR / f"{clean_filename(vzacnost)}.pdf"
-        if back_pdf.is_file():
+        if back_pdf.exists():
             back_reader = PdfReader(back_pdf)
             writer.add_page(back_reader.pages[0])  # rub
         else:
-            print(f"Varování: Rubový PDF pro vzácnost '{vzacnost}' nenalezen (hledáno jako {back_pdf.name}). Stránka bude bez rubu.")
+            print(f"Rubový PDF pro '{vzacnost}' nenalezen (hledáno v {back_pdf}), pokračuji bez něj.")
 
     with open(FINAL_PDF, "wb") as f:
         writer.write(f)
