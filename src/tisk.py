@@ -9,6 +9,9 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from PyPDF2 import PdfReader, PdfWriter
+import tkinter as tk
+from tkinter import messagebox, filedialog
+import shutil
 import io
  
 # ---------------- Cesta k projektu ----------------
@@ -148,12 +151,43 @@ def create_backed_pdf():
         vzacnost = rarity_pages[i]
         writer.add_page(page)  # líc
 
-        back_pdf = SCRIPT_DIR / f"{clean_filename(vzacnost)}.pdf"
+        back_pdf_name = f"{clean_filename(vzacnost)}.pdf"
+        back_pdf = SCRIPT_DIR / back_pdf_name
+
+        if not back_pdf.is_file():
+            # Pokud rub chybí, zeptáme se uživatele, zda ho chce přidat
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+
+            user_agrees = messagebox.askyesno(
+                "Chybí rubová strana",
+                f"Rubový PDF pro vzácnost '{vzacnost}' nebyl nalezen.\n"
+                f"Očekávaný název souboru je: '{back_pdf_name}' ve složce 'src'.\n\n"
+                f"Chcete nyní vybrat soubor, který se zkopíruje pod správným názvem?",
+                parent=root
+            )
+
+            if user_agrees:
+                source_file = filedialog.askopenfilename(
+                    title=f"Vyberte PDF soubor pro vzácnost '{vzacnost}'",
+                    filetypes=[("PDF soubory", "*.pdf")],
+                    parent=root
+                )
+                if source_file:
+                    try:
+                        shutil.copy2(source_file, back_pdf)
+                        print(f"Soubor '{Path(source_file).name}' byl zkopírován do 'src' jako '{back_pdf_name}'.")
+                    except Exception as e:
+                        messagebox.showerror("Chyba kopírování", f"Nepodařilo se zkopírovat soubor: {e}", parent=root)
+            
+            root.destroy()
+
         if back_pdf.is_file():
             back_reader = PdfReader(back_pdf)
             writer.add_page(back_reader.pages[0])  # rub
         else:
-            print(f"Varování: Rubový PDF pro vzácnost '{vzacnost}' nenalezen (hledáno jako {back_pdf.name}). Stránka bude bez rubu.")
+            print(f"Varování: Rubový PDF pro vzácnost '{vzacnost}' stále nenalezen (hledáno jako {back_pdf_name}). Stránka bude bez rubu.")
 
     with open(FINAL_PDF, "wb") as f:
         writer.write(f)

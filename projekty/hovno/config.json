@@ -10,7 +10,7 @@
         "excel": "karty.xlsx",
         "sablona": "sablona_Default.svg"
     },
-    "last_completed_script": "editor",
+    "last_completed_script": "tisk",
     "tisk": {
         "pdf_licove": "vystup\\karty_pro_tisk.pdf",
         "pdf_oboustranne": "vystup\\karty_pro_tisk_oboustranne.pdf"
