@@ -12,6 +12,7 @@ import json
 import shutil
 import sys
 from pathlib import Path
+import zipfile
 
 # ---------------- Constants ----------------
 PROJECTS_DIR = Path("projekty")
@@ -106,9 +107,12 @@ class ScriptGUI:
 
         left_frame = tk.Frame(root)
         left_frame.pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=10)
+        tk.Label(left_frame, text="Projekt:", font=("Arial", 10, "bold")).pack(pady=(0, 2))
+        tk.Label(left_frame, text=self.current_project, font=("Arial", 10)).pack(pady=(0, 15))
         tk.Label(left_frame, text="Výstupy", font=("Arial", 10, "bold")).pack(pady=(0, 5))
         tk.Button(left_frame, text="Stáhnout PDF\npro tisk", command=self.download_print_pdf, width=18).pack(pady=5)
         tk.Button(left_frame, text="Stáhnout PDF\noboustranné", command=self.download_backed_pdf, width=18).pack(pady=5)
+        tk.Button(left_frame, text="Stáhnout projekt\n(ZIP)", command=self.download_project_zip, width=18).pack(pady=5)
 
         console_frame = tk.Frame(root)
         console_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -139,10 +143,6 @@ class ScriptGUI:
 
         self._update_button_states_based_on_progress() # Nastaví počáteční stav tlačítek
 
-        # Status bar
-        self.status_bar = tk.Label(root, text=f"Aktuální projekt: {self.current_project}", bd=1, relief=tk.SUNKEN, anchor=tk.W, font=("Arial", 10, "italic"))
-        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
-
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
     # ---------------- Add a single script button ----------------
@@ -169,7 +169,7 @@ class ScriptGUI:
     def open_source_window(self):
         top = tk.Toplevel(self.root)
         top.title("Zdroje projektu")
-        top.geometry("400x250")
+        top.geometry("550x250")
         top.transient(self.root)
         top.grab_set()
         top.focus_force()
@@ -194,6 +194,13 @@ class ScriptGUI:
             file = filedialog.askopenfilename(title="Vyberte šablonu", filetypes=[("Svg files", "*.svg*")], parent=top)
             if file:
                 sablona_var.set(file)
+
+        def use_default_sablona():
+            default_path = SRC_DIR / "sablona_Default.svg"
+            if default_path.exists():
+                sablona_var.set(str(default_path.resolve()))
+            else:
+                messagebox.showerror("Chyba", f"Defaultní šablona nebyla nalezena:\n{default_path}", parent=top)
 
         def save_sources(event=None):
             excel_path = Path(excel_var.get())
@@ -238,6 +245,7 @@ class ScriptGUI:
         tk.Label(frm2, text="Šablona:").pack(side=tk.LEFT)
         tk.Entry(frm2, textvariable=sablona_var, width=30).pack(side=tk.LEFT, padx=14)
         tk.Button(frm2, text="Vybrat", command=select_sablona).pack(side=tk.LEFT)
+        tk.Button(frm2, text="Použít defaultní", command=use_default_sablona).pack(side=tk.LEFT, padx=5)
 
         tk.Button(top, text="Uložit", command=save_sources, bg="#a0e0a0").pack(pady=20)
         top.bind('<Return>', save_sources)
@@ -582,6 +590,31 @@ class ScriptGUI:
                 
         except Exception as e:
             messagebox.showerror("Chyba", f"Nastala chyba při ukládání PDF:\n{e}")
+
+    def download_project_zip(self):
+        project_path = PROJECTS_DIR / self.current_project
+        if not project_path.exists():
+             messagebox.showerror("Chyba", "Složka projektu neexistuje.")
+             return
+
+        target_path = filedialog.asksaveasfilename(
+            title="Uložit projekt jako ZIP",
+            initialfile=f"{self.current_project}.zip",
+            defaultextension=".zip",
+            filetypes=[("ZIP archiv", "*.zip")]
+        )
+
+        if target_path:
+            try:
+                with zipfile.ZipFile(target_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    for root, dirs, files in os.walk(project_path):
+                        for file in files:
+                            file_path = os.path.join(root, file)
+                            arcname = os.path.relpath(file_path, project_path)
+                            zipf.write(file_path, arcname)
+                messagebox.showinfo("Úspěch", f"Projekt byl úspěšně zazipován a uložen do:\n{target_path}")
+            except Exception as e:
+                messagebox.showerror("Chyba", f"Nastala chyba při ukládání ZIP archivu:\n{e}")
 
 # ---------------- Application entry point ----------------
 if __name__ == "__main__":

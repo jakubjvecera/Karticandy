@@ -8,7 +8,7 @@
     },
     "zdroje": {
         "excel": "karty.xlsx",
-        "sablona": "sablona_Bezna.svg"
+        "sablona": "sablona_Default.svg"
     },
     "last_completed_script": "editor",
     "tisk": {
