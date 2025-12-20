@@ -279,6 +279,8 @@ class ScriptGUI:
         for section in config:
             if section == "zdroje":
                 continue
+            if not isinstance(config[section], dict):
+                continue
             for key, value in config[section].items():
                 if key == "alpha": # Skryjeme pole pro průhlednost v GUI
                     continue
@@ -361,7 +363,7 @@ class ScriptGUI:
     # ---------------- Script execution ----------------
     def confirm_and_run(self, name):
         if self.is_script_running:
-            messagebox.showwarning("Zaneprázdněn", "Jiný skript právě běží. Počkejte na jeho dokončení.")
+            messagebox.showwarning("Upozrnění", "Jiný script právě běží. Počkejte na jeho dokončení.")
             return
         # Kontrola, zda jsou vyplněny zdroje
         project_path = PROJECTS_DIR / self.current_project
@@ -374,7 +376,7 @@ class ScriptGUI:
                 messagebox.showerror("Chybějící zdroje", "Nejdříve musíte nastavit zdroje projektu.")
                 return
         except (FileNotFoundError, json.JSONDecodeError) as e:
-            messagebox.showerror("Chyba konfigurace", f"Nepodařilo se načíst konfigurační soubor: {e}")
+            messagebox.showerror("Chyba", f"Nepodařilo s načíst konfigurační soubor: {e}")
             return
 
         if messagebox.askyesno("Potvrzení", f"Opravdu spustit {name.capitalize()}?"):
@@ -392,10 +394,9 @@ class ScriptGUI:
             self.time_labels[name] = time_label
 
         display_name = self.stem_to_display.get(name, name.capitalize())
-        self._write_console(f"[{datetime.now().strftime('%H:%M:%S')}] {display_name} spuštěn", bold_time=True)
-        threading.Thread(target=self._execute_script, args=(name,), daemon=True).start() # Spustí skript v samostatném vlákně
-        self._update_time_label(name)
-
+        self._write_console(f"[{datetime.now().strftime('%H:%M:%S')}] Spouštím: {display_name}", bold_time=True)
+        threading.Thread(target=self._execute_script, args=(name,), 
+            daemon=True).start()
     def _execute_script(self, name):
         script = SCRIPTS[name]
         project_path = PROJECTS_DIR / self.current_project
@@ -416,18 +417,18 @@ class ScriptGUI:
                 script_successful = True
             else:
                 display_name = self.stem_to_display.get(name, name.capitalize())
-                self._write_console(f"\t {display_name} skončil s chybou (exit code: {process.returncode}).")
+                self._write_console(f"\t Chyba: {display_name} skončil s chybou (exit code: {process.returncode}).")
         except Exception as e:
-            self._write_console(f"\t Chyba při spuštění {self.stem_to_display.get(name, name.capitalize())}u: {e}")
+            self._write_console(f"\t Chyba: Nepodařilo se spustit {self.stem_to_display.get(name, name.capitalize())}: {e}")
         finally:
             self.is_script_running = False
             start_time = self.running_times.pop(name, time.time())
             elapsed = time.time() - start_time
+
             if name in self.time_labels:
                 self.time_labels[name].destroy()
                 del self.time_labels[name]
             if script_successful:
-                display_name = self.stem_to_display.get(name, name.capitalize())
                 self._write_console(f"           {elapsed:.2f} s")
                 self._update_script_progress(name)
             self._write_console("")

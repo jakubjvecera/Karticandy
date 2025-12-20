@@ -42,10 +42,10 @@ rozmer_karty_str = config.get("generator", {}).get("RozmerKarty", "63.5x88.9mm")
 try:
     w_str, h_str = rozmer_karty_str.lower().replace("mm", "").split('x')
     CARD_W_MM, CARD_H_MM = float(w_str), float(h_str)
-    print(f"Načteny rozměry karty z configu: {CARD_W_MM}x{CARD_H_MM} mm")
+    print(f"Info: Načteny rozměry karty z konfigurace: {CARD_W_MM}x{CARD_H_MM} mm")
 except (ValueError, IndexError):
     CARD_W_MM, CARD_H_MM = 63.5, 88.9
-    print(f"Nepodařilo se načíst rozměry karty z configu, použity výchozí: {CARD_W_MM}x{CARD_H_MM} mm")
+    print(f"Varování: Nepodařilo se načíst rozměry karty, použity výchozí: {CARD_W_MM}x{CARD_H_MM} mm")
 
 MARGIN_MM = 7
 GAP_MM    = 2
@@ -69,7 +69,7 @@ def clean_filename(name: str) -> str:
 def create_print_pdf():
     """Vytvoří PDF s lícovými stranami karet."""
     if not EXCEL_FILE.exists():
-        print(f"Excel soubor '{EXCEL_FILE}' nenalezen.")
+        print(f"Chyba: Soubor Excelu '{EXCEL_FILE}' nebyl nalezen.")
         return
 
     df = pd.read_excel(str(EXCEL_FILE))
@@ -122,12 +122,12 @@ def create_print_pdf():
             c.showPage()
 
     c.save()
-    print(f"Lícové PDF vytvořeno: {OUTPUT_PDF}")
+    print(f"Info: Lícové PDF vytvořeno: {OUTPUT_PDF}")
 
 def create_backed_pdf():
     """Za každou stránku líců vloží rub odpovídající vzácnosti stránky."""
     if not EXCEL_FILE.exists():
-        print(f"Excel soubor '{EXCEL_FILE}' nenalezen.")
+        print(f"Chyba: Soubor Excelu '{EXCEL_FILE}' nebyl nalezen.")
         return
 
     df = pd.read_excel(str(EXCEL_FILE))
@@ -144,7 +144,7 @@ def create_backed_pdf():
     writer = PdfWriter()
 
     if len(rarity_pages) != len(reader.pages):
-        print(f"Počet stránek a vzácností nesedí, použiji minimum")
+        print(f"Varování: Nesouhlasí počet stránek a vzácností, oříznuto na minimum.")
         rarity_pages = rarity_pages[:len(reader.pages)]
 
     for i, page in enumerate(reader.pages):
@@ -177,7 +177,7 @@ def create_backed_pdf():
                 if source_file:
                     try:
                         shutil.copy2(source_file, back_pdf)
-                        print(f"Soubor '{Path(source_file).name}' byl zkopírován do 'src' jako '{back_pdf_name}'.")
+                        print(f"Info: Soubor '{Path(source_file).name}' byl zkopírován do 'src' jako '{back_pdf_name}'.")
                     except Exception as e:
                         messagebox.showerror("Chyba kopírování", f"Nepodařilo se zkopírovat soubor: {e}", parent=root)
             
@@ -192,7 +192,7 @@ def create_backed_pdf():
     with open(FINAL_PDF, "wb") as f:
         writer.write(f)
 
-    print(f"Oboustranné PDF vytvořeno: {FINAL_PDF}")
+    print(f"Info: Oboustranné PDF vytvořeno: {FINAL_PDF}")
 
 if __name__ == "__main__":
     create_print_pdf()    # vytvoří lícové PDF
@@ -209,4 +209,4 @@ if __name__ == "__main__":
 
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=4, ensure_ascii=False)
-    print("Cesty k PDF souborům uloženy do config.json")
+    print("Info: Cesty k PDF souborům uloženy do konfigurace.")

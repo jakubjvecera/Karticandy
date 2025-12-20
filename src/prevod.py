@@ -5,7 +5,7 @@ import sys
 
 # --- Získání cesty k projektu z argumentu ---
 if len(sys.argv) < 2:
-    print("Nebyla předána cesta k projektu.")
+    print("Chyba: Nebyla předána cesta k projektu.")
     sys.exit(1)
 
 PROJECT_PATH = Path(sys.argv[1])
@@ -40,29 +40,29 @@ edited_files = {p.relative_to(SVG_EDITED_ROOT) for p in SVG_EDITED_ROOT.rglob("*
 missing_files = original_files - edited_files
 
 if missing_files:
-    print("--- INFO: Následující soubory nebyly upraveny v editoru a budou převedeny z původní verze. ---")
+    print("Info: Následující soubory nebyly upraveny, použije se původní verze:")
     for f in sorted(missing_files):
         print(f" - {f}")
-    print("-------------------------------------------------------------------------")
+    print("-" * 60)
 
 # --- Převod pouze upravených SVG souborů ---
 if not edited_files:
-    print(f"Složka '{SVG_EDITED_ROOT.name}' neexistuje nebo je prázdná. Pokračuji převáděním neupravených (původních) souborů.")
+    print(f"Info: Složka upravených karet '{SVG_EDITED_ROOT.name}' je prázdná nebo neexistuje. Budou převedeny původní verze.")
 else:
     for svg_file in SVG_EDITED_ROOT.rglob("*.svg"):
         relative_path = svg_file.relative_to(SVG_EDITED_ROOT)
         output_png_path = (OUTPUT_PNG_ROOT / relative_path).with_suffix(".png")
         output_png_path.parent.mkdir(parents=True, exist_ok=True)
 
-        print(f"Převádím upravený soubor: {relative_path}")
+        print(f"Zpracovávám (upravený): {relative_path}")
         try:
             subprocess.run([str(INKSCAPE_PATH), str(svg_file), "--export-type=png", f"--export-filename={output_png_path}", "--export-dpi=300"], check=True, capture_output=True, text=True, encoding='utf-8')
         except subprocess.CalledProcessError as e:
-            print(f"Chyba při převodu souboru {svg_file.name}: {e.stderr}")
+            print(f"Chyba: Nepodařilo se převést {svg_file.name}: {e.stderr}")
 
 # --- Převod neupravených SVG souborů (ty, které chybí v 'vystup_editedsvg') ---
 if missing_files:
-    print("\n--- Převádím neupravené (původní) soubory ---")
+    print("\nInfo: Převádím neupravené (původní) soubory...")
     output_unedited_root = OUTPUT_PNG_ROOT / "unedited"
     output_unedited_root.mkdir(exist_ok=True)
 
@@ -71,10 +71,10 @@ if missing_files:
         output_png_path = (output_unedited_root / missing_file_rel_path).with_suffix(".png")
         output_png_path.parent.mkdir(parents=True, exist_ok=True)
 
-        print(f"Převádím původní soubor: {missing_file_rel_path}")
+        print(f"Zpracovávám (původní): {missing_file_rel_path}")
         try:
             subprocess.run([str(INKSCAPE_PATH), str(svg_file), "--export-type=png", f"--export-filename={output_png_path}", "--export-dpi=300"], check=True, capture_output=True, text=True, encoding='utf-8')
         except subprocess.CalledProcessError as e:
-            print(f"Chyba při převodu souboru {svg_file.name}: {e.stderr}")
+            print(f"Chyba: Nepodařilo se převést {svg_file.name}: {e.stderr}")
 
 print("Hotovo!")

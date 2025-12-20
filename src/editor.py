@@ -18,7 +18,7 @@ import base64
 
 # ---------------- cesta k projektu ----------------
 if len(sys.argv) < 2:
-    print("Nebyla předána cesta k projektu.")
+    print("Chyba: Nebyla předána cesta k projektu.")
     sys.exit(1)
 
 PROJECT_PATH = Path(sys.argv[1])
@@ -33,7 +33,7 @@ INKSCAPE_EDIT_FOLDER.mkdir(parents=True, exist_ok=True)
 
 
 if not OUTPUT_FOLDER.exists():
-    print(f"Složka se SVG soubory neexistuje: {OUTPUT_FOLDER}")
+    print(f"Chyba: Výstupní složka SVG neexistuje: {OUTPUT_FOLDER}")
     sys.exit(1)
 
 
@@ -429,7 +429,7 @@ class SVGEditor(TkinterDnD.Tk):
                 self.after(0, self.center_display_svg)
                 self.after(0, lambda: self.highlight_active_tree_item(path))
             except Exception as e:
-                self.after(0, lambda: messagebox.showerror("Chyba při načítání SVG", str(e)))
+                self.after(0, lambda: messagebox.showerror("Chyba", f"Chyba při načítání SVG: {e}"))
 
         threading.Thread(target=load_thread, daemon=True).start()
 
@@ -671,7 +671,7 @@ class SVGEditor(TkinterDnD.Tk):
         # Pokud soubor pro editaci již existuje, zeptáme se uživatele, co dělat.
         if inkscape_dest_path.exists():
             response = messagebox.askyesno(
-                "Soubor již existuje",
+                "Upozornění",
                 "Tento soubor je již otevřen pro úpravy. Přejete si začít znovu?\n\n"
                 "• Ano: Smaže starou verzi a vytvoří novou kopii.\n"
                 "• Ne: Zruší operaci a neprovede žádnou změnu.",
@@ -803,7 +803,7 @@ class SVGEditor(TkinterDnD.Tk):
 
             self.load_svg_by_path(self.current_svg_path)
         except Exception as e:
-            messagebox.showerror("Chyba při ukládání SVG", str(e))
+            messagebox.showerror("Chyba", f"Chyba při ukládání SVG: {e}")
 
     def handle_inkscape_save(self, changed_edit_path: Path):
         watch_info = self.inkscape_watch_files.get(changed_edit_path)

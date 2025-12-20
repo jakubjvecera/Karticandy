@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import pandas as pd
 from pathlib import Path
-import xml.etree.ElementTree as ET
+import lxml.etree as ET
 import unicodedata
 import re
 import sys
@@ -19,18 +19,22 @@ def set_display(elem, value):
     novy_styl = ";".join(
         s for s in styl.split(";") if not s.strip().startswith("display:")
     )
-    elem.set("style", (novy_styl + f";display:{value}").strip(";"))
+    final_styl = (novy_styl + f";display:{value}").strip(";")
+    elem.set("style", final_styl)
 
 def najdi_g(root, name, namespaces):
+    # lxml vyzaduje explicitni namespaces v xpath, pokud jsou v dokumentu
     for attr in ["id", "inkscape:label", "sodipodi:label", "label"]:
-        elem = root.find(f".//svg:g[@{attr}='{name}']", namespaces)
-        if elem is not None:
-            return elem
+        # Zkusime najit element s namespace i bez nej pro robustnost
+        xpath_query = f".//svg:g[@{attr}='{name}']"
+        elems = root.xpath(xpath_query, namespaces=namespaces)
+        if elems:
+            return elems[0]
     return None
 
 # ---------------- Cesta k projektu ----------------
 if len(sys.argv) < 2:
-    print("Nebyla předána cesta k projektu.")
+    print("Chyba: Nebyla předána cesta k projektu.")
     sys.exit(1)
 
 project_path = Path(sys.argv[1])
@@ -44,7 +48,7 @@ vystup_svg_dir.mkdir(exist_ok=True)
 
 config_path = project_path / "config.json"
 if not config_path.exists():
-    print(f"Chybí config soubor: {config_path}")
+    print(f"Chyba: Chybí konfigurační soubor: {config_path}")
     sys.exit(1)
 
 with open(config_path, "r", encoding="utf-8") as f:
@@ -54,49 +58,51 @@ excel_file = data_dir / config["zdroje"].get("excel", "")
 sablona_file = data_dir / config["zdroje"].get("sablona", "")
 
 if not excel_file.exists():
-    print(f"Excel soubor nenalezen: {excel_file}")
+    print(f"Chyba: Soubor Excelu nenalezen: {excel_file}")
     sys.exit(1)
 
 if not sablona_file.exists():
-    print(f"Šablona nenalezena: {sablona_file}")
+    print(f"Chyba: Šablona nenalezena: {sablona_file}")
     sys.exit(1)
 
 # ---------------- Načtení dat z Excelu ----------------
 try:
     df = pd.read_excel(excel_file)
 except Exception as e:
-    print(f"Chyba při načítání Excel souboru: {e}")
+    print(f"Chyba: Nepodařilo se načíst Excel soubor: {e}")
     sys.exit(1)
 
 # ---------------- SVG nastavení ----------------
 namespaces = {
     'svg': 'http://www.w3.org/2000/svg',
     'inkscape': 'http://www.inkscape.org/namespaces/inkscape',
-    'sodipodi': 'http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd'
+    'sodipodi': 'http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd',
+    'xlink': 'http://www.w3.org/1999/xlink'
 }
 
 # ---------------- Zpracování karet ----------------
 for index, row in df.iterrows():
     if "Vzacnost" not in row or pd.isna(row["Vzacnost"]):
-        print(f"Karta na řádku {index+2} nemá vyplněnou vzácnost.")
+        print(f"Varování: Řádek {index+2} - chybí vzácnost.")
         continue
     if "Nazev" not in row or pd.isna(row["Nazev"]):
-        print(f"Karta na řádku {index+2} nemá vyplněný název.")
+        print(f"Varování: Řádek {index+2} - chybí název.")
         continue
     if "Kategorie" not in row or pd.isna(row["Kategorie"]):
-        print(f"Karta na řádku {index+2} nemá vyplněnou kategorii.")
+        print(f"Varování: Řádek {index+2} - chybí kategorie.")
         continue
 
     # Načti šablonu
     try:
-        tree = ET.parse(sablona_file)
+        parser = ET.XMLParser(remove_blank_text=False, strip_cdata=False)
+        tree = ET.parse(str(sablona_file), parser)
         root = tree.getroot()
     except ET.ParseError as e:
-        print(f"Chyba při načítání SVG šablony: {e}")
+        print(f"Chyba: Nepodařilo se načíst SVG šablonu: {e}")
         continue
 
     # Nahrazení placeholderů podle názvů sloupců
-    svg_text = ET.tostring(root, encoding="unicode")
+    svg_text = ET.tostring(root, encoding="unicode", method="xml")
     for col in df.columns:
         hodnota = row[col]
         if pd.isna(hodnota):
@@ -107,18 +113,18 @@ for index, row in df.iterrows():
 
         svg_text = re.sub(rf">\s*{re.escape(col)}\s*<", f">{hodnota}<", svg_text)
 
-    root = ET.fromstring(svg_text)
+    root = ET.fromstring(svg_text.encode('utf-8'), parser=ET.XMLParser(remove_blank_text=False))
 
     # --- Kategorie ---
     kategorie_root = najdi_g(root, "Kategorie", namespaces)
     if kategorie_root is not None:
         aktualni_kategorie = str(row["Kategorie"]).strip()
-        for podskupina in kategorie_root.findall(".//svg:g", namespaces):
+        for podskupina in kategorie_root.xpath(".//svg:g", namespaces=namespaces):
             set_display(podskupina, "none")
         cilova = najdi_g(kategorie_root, aktualni_kategorie, namespaces)
         if cilova is not None:
             set_display(cilova, "inline")
-            for vnoreny in cilova.findall(".//svg:g", namespaces):
+            for vnoreny in cilova.xpath(".//svg:g", namespaces=namespaces):
                 set_display(vnoreny, "inline")
         else:
             print(f"Varování: Kategorie '{aktualni_kategorie}' nebyla nalezena v šabloně.")
@@ -126,11 +132,11 @@ for index, row in df.iterrows():
     # --- Vzácnost ---
     vzacnost_skupiny = []
     for attr in ["id", "inkscape:label", "sodipodi:label", "label"]:
-        vzacnost_skupiny.extend(root.findall(f".//svg:g[@{attr}='Vzacnost']", namespaces))
+        vzacnost_skupiny.extend(root.xpath(f".//svg:g[@{attr}='Vzacnost']", namespaces=namespaces))
 
     aktualni_vzacnost = odstranit_diakritiku(row["Vzacnost"]).lower().strip()
     for vzacnost_root in vzacnost_skupiny:
-        for podskupina in vzacnost_root.findall(".//svg:g", namespaces):
+        for podskupina in vzacnost_root.xpath(".//svg:g", namespaces=namespaces):
             set_display(podskupina, "none")
         cilova = najdi_g(vzacnost_root, aktualni_vzacnost, namespaces)
         if cilova is not None:
@@ -153,9 +159,9 @@ for index, row in df.iterrows():
 
     try:
         tree = ET.ElementTree(root)
-        tree.write(vystup_soubor, encoding="utf-8", xml_declaration=True, method="xml")
+        tree.write(str(vystup_soubor), encoding="utf-8", xml_declaration=True, method="xml", pretty_print=False)
     except Exception as e:
-        print(f"Chyba při ukládání souboru {vystup_soubor}: {e}")
+        print(f"Chyba: Nepodařilo se uložit soubor {vystup_soubor}: {e}")
         continue
 
 print("Hotovo!")
