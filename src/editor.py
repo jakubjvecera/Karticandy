@@ -703,13 +703,14 @@ class SVGEditor(TkinterDnD.Tk):
             with open(INKSCAPE_WATCH_STATE_FILE, "w", encoding="utf-8") as f:
                 # Uložíme cesty jako stringy pro serializaci
                 save_data = {
-                    str(k): {**v, "original_path": str(v["original_path"]), "edit_path": str(v["edit_path"])}
+                    str(k): {**{key: val for key, val in v.items() if key != "process"}, "original_path": str(v["original_path"]), "edit_path": str(v["edit_path"])}
                     for k, v in self.inkscape_watch_files.items()
                 }
                 json.dump(save_data, f, indent=4)
 
             # Spustíme Inkscape
-            subprocess.Popen([str(INKSCAPE_PATH), str(inkscape_dest_path)])
+            proc = subprocess.Popen([str(INKSCAPE_PATH), str(inkscape_dest_path)])
+            watch_info["process"] = proc
             self.update_tree()
         except Exception as e:
             messagebox.showerror("Chyba", f"Nepodařilo se otevřít Inkscape: {e}")
@@ -744,7 +745,10 @@ class SVGEditor(TkinterDnD.Tk):
             if needs_state_save:
                 try:
                     with open(INKSCAPE_WATCH_STATE_FILE, "w", encoding="utf-8") as f:
-                        save_data = {str(k): {**v, "original_path": str(v["original_path"]), "edit_path": str(v["edit_path"])} for k, v in self.inkscape_watch_files.items()}
+                        save_data = {
+                            str(k): {**{key: val for key, val in v.items() if key != "process"}, "original_path": str(v["original_path"]), "edit_path": str(v["edit_path"])}
+                            for k, v in self.inkscape_watch_files.items()
+                        }
                         json.dump(save_data, f, indent=4)
                 except Exception as e:
                     print(f"Chyba při ukládání stavu sledování: {e}")
@@ -823,7 +827,7 @@ class SVGEditor(TkinterDnD.Tk):
             try:
                 with open(INKSCAPE_WATCH_STATE_FILE, "w", encoding="utf-8") as f:
                     save_data = {
-                        str(k): {**v, "original_path": str(v["original_path"]), "edit_path": str(v["edit_path"])}
+                        str(k): {**{key: val for key, val in v.items() if key != "process"}, "original_path": str(v["original_path"]), "edit_path": str(v["edit_path"])}
                         for k, v in self.inkscape_watch_files.items()
                     }
                     json.dump(save_data, f, indent=4)
@@ -880,12 +884,23 @@ class SVGEditor(TkinterDnD.Tk):
             except Exception:
                 pass
 
+        # Zavřít běžící instance Inkscape
+        for watch_info in self.inkscape_watch_files.values():
+            proc = watch_info.get("process")
+            if proc:
+                try:
+                    if proc.poll() is None:
+                        proc.terminate()
+                except Exception:
+                    pass
+
         # Při zavření smažeme dočasné soubory z editoru
         for edit_path in self.inkscape_watch_files:
             try:
                 edit_path.unlink(missing_ok=True)
             except OSError: pass
         # INKSCAPE_WATCH_STATE_FILE se už nemaže, aby se stav zachoval
+        print("Hotovo!")
         self.destroy()
 
 # ---------------- spustit ----------------
