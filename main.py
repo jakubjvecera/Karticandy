@@ -27,10 +27,17 @@ DEFAULT_CONFIG = {
     "zdroje": {"excel": "", "sablona": ""},
     "last_completed_script": "" # Nový klíč pro sledování průběhu
 }
-
-BUTTON_ORDER = ["Generator", "Editor", "Prevod", "Tisk"]
-
 # ---------------- Load scripts from src folder ----------------
+# Mapování zobrazovaných názvů na interní názvy souborů (bez diakritiky)
+BUTTON_MAPPING = {
+    "Generátor": "generator",
+    "Editor": "editor",
+    "Převod": "prevod",
+    "Tisk": "tisk",
+}
+# Pořadí tlačítek v GUI
+BUTTON_ORDER = ["Generátor", "Editor", "Převod", "Tisk"]
+
 SCRIPTS = {}
 for py_file in SRC_DIR.glob("*.py"):
     if py_file.name == "__init__.py":
@@ -87,7 +94,7 @@ def select_project_window(root):
 class ScriptGUI:
     def __init__(self, root, current_project):
         self.root = root
-        self.root.title("Nástroj pro tvorbu karet")
+        self.root.title("Kartičandy")
         self.current_project = current_project
         self._display_to_stem = {}
 
@@ -107,7 +114,8 @@ class ScriptGUI:
         self.running_times = {}
         self.is_script_running = False
 
-        self.script_order = [s.lower() for s in BUTTON_ORDER] # Pro snadnější porovnání
+        self.stem_to_display = {v: k for k, v in BUTTON_MAPPING.items()}
+        self.script_order = [BUTTON_MAPPING[name] for name in BUTTON_ORDER] # Pro snadnější porovnání
         # Add buttons exactly according to BUTTON_ORDER
         self._add_all_buttons(top_frame)
 
@@ -141,7 +149,7 @@ class ScriptGUI:
         If a script is missing, its button is not created.
         """
         for display_name in BUTTON_ORDER:
-            stem = display_name.lower()
+            stem = BUTTON_MAPPING.get(display_name)
             if stem in SCRIPTS:
                 self._add_script_button(parent, display_name, stem)
 
@@ -175,7 +183,7 @@ class ScriptGUI:
             if file:
                 sablona_var.set(file)
 
-        def save_sources():
+        def save_sources(event=None):
             excel_path = Path(excel_var.get())
             sablona_path = Path(sablona_var.get())
 
@@ -220,6 +228,7 @@ class ScriptGUI:
         tk.Button(frm2, text="Vybrat", command=select_sablona).pack(side=tk.LEFT)
 
         tk.Button(top, text="Uložit", command=save_sources, bg="#a0e0a0").pack(pady=20)
+        top.bind('<Return>', save_sources)
 
     # ---------------- Settings window ----------------
     def open_settings_window(self):
@@ -255,7 +264,7 @@ class ScriptGUI:
                     continue
                 add_field(section, key, value)
 
-        def save_config():
+        def save_config(event=None):
             for (section, key), var in entries.items():
                 val = var.get()
                 if val.lower() in ["true", "false"]:
@@ -269,6 +278,7 @@ class ScriptGUI:
             top.destroy()
 
         tk.Button(top, text="Uložit změny", command=save_config, bg="#a0e0a0").pack(pady=20)
+        top.bind('<Return>', save_config)
 
     def _set_buttons_state(self, state):
         """Enable or disable all script buttons."""
@@ -302,23 +312,28 @@ class ScriptGUI:
     def _update_button_states_based_on_progress(self):
         """Nastaví stav tlačítek na základě posledního dokončeného skriptu."""
         last_completed = self._get_current_script_progress().lower()
-        
-        if last_completed == "tisk":
-            # Pokud je Tisk dokončen, všechny skripty jsou považovány za dokončené pro tuto sekvenci
-            for stem in self.buttons:
-                self.buttons[stem].config(state='disabled')
-            return
 
+        # Najdeme index posledního dokončeného skriptu
         current_index = -1
         if last_completed in self.script_order:
             current_index = self.script_order.index(last_completed)
 
         for i, display_name in enumerate(BUTTON_ORDER):
-            stem = display_name.lower()
+            stem = BUTTON_MAPPING[display_name]
             if stem in self.buttons:
-                # Povolí Generátor, pokud ještě žádný skript nebyl dokončen
-                # Nebo povolí další skript v pořadí
-                if (current_index == -1 and i == 0) or (i == current_index + 1):
+                # Pokud ještě žádný skript nebyl dokončen, povolit pouze první (Generator), jinak povolit všechny až do dalšího kroku
+                if current_index == -1:
+                    if i == 0:
+                        self.buttons[stem].config(state='normal')
+                    else:
+                        self.buttons[stem].config(state='disabled')
+                # Pokud byl dokončen "Tisk", povolit všechna tlačítka (sekvence je hotová)
+                elif last_completed == "tisk":
+                    self.buttons[stem].config(state='normal')
+                # Jinak povolit všechny skripty až do (včetně) dalšího v pořadí
+                # To znamená, že předchozí dokončené skripty zůstanou povolené
+                # a povolí se i ten, který je na řadě jako další.
+                elif i <= current_index + 1 or (current_index == 0 and i == 2):
                     self.buttons[stem].config(state='normal')
                 else:
                     self.buttons[stem].config(state='disabled')
@@ -345,7 +360,7 @@ class ScriptGUI:
         if messagebox.askyesno("Potvrzení", f"Opravdu spustit {name.capitalize()}?"):
             self.run_script(name)
 
-    def run_script(self, name):
+    def run_script(self, name): # sourcery skip: raise-specific-error
         self.is_script_running = True
         # Zakáže všechna tlačítka, aby se zabránilo spuštění dalších skriptů během běhu
         for btn_stem in self.buttons:
@@ -356,13 +371,15 @@ class ScriptGUI:
             time_label.pack(side=tk.TOP, pady=2)
             self.time_labels[name] = time_label
 
-        self._write_console(f"[{datetime.now().strftime('%H:%M:%S')}] {name.capitalize()} spuštěn", bold_time=True)
+        display_name = self.stem_to_display.get(name, name.capitalize())
+        self._write_console(f"[{datetime.now().strftime('%H:%M:%S')}] {display_name} spuštěn", bold_time=True)
         threading.Thread(target=self._execute_script, args=(name,), daemon=True).start() # Spustí skript v samostatném vlákně
         self._update_time_label(name)
 
     def _execute_script(self, name):
         script = SCRIPTS[name]
         project_path = PROJECTS_DIR / self.current_project
+        script_successful = False
         try:
             process = subprocess.Popen(
                 [sys.executable, script, str(project_path)], # Argumenty pro proces
@@ -375,8 +392,13 @@ class ScriptGUI:
             for line in process.stdout:
                 self._write_console(f"\t {line.strip()}")
             process.wait()
+            if process.returncode == 0:
+                script_successful = True
+            else:
+                display_name = self.stem_to_display.get(name, name.capitalize())
+                self._write_console(f"\t {display_name} skončil s chybou (exit code: {process.returncode}).")
         except Exception as e:
-            self._write_console(f"\t Chyba při spuštění: {e}")
+            self._write_console(f"\t Chyba při spuštění {self.stem_to_display.get(name, name.capitalize())}u: {e}")
         finally:
             self.is_script_running = False
             start_time = self.running_times.pop(name, time.time())
@@ -384,9 +406,12 @@ class ScriptGUI:
             if name in self.time_labels:
                 self.time_labels[name].destroy()
                 del self.time_labels[name]
-            self._write_console(f"{name.capitalize()} dokončen, běžel {elapsed:.2f} s")
+            if script_successful:
+                display_name = self.stem_to_display.get(name, name.capitalize())
+                self._write_console(f"           {elapsed:.2f} s")
+                self._update_script_progress(name)
             self._write_console("")
-            self._set_buttons_state('normal')
+            self.root.after(100, self._update_button_states_based_on_progress)
 
     def _update_time_label(self, name):
         if name not in self.running_times or name not in self.time_labels:

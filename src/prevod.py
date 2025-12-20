@@ -47,7 +47,7 @@ if missing_files:
 
 # --- Převod pouze upravených SVG souborů ---
 if not edited_files:
-    print(f"Složka '{SVG_EDITED_ROOT.name}' neexistuje nebo je prázdná. Není co převádět.")
+    print(f"Složka '{SVG_EDITED_ROOT.name}' neexistuje nebo je prázdná. Pokračuji převáděním neupravených (původních) souborů.")
 else:
     for svg_file in SVG_EDITED_ROOT.rglob("*.svg"):
         relative_path = svg_file.relative_to(SVG_EDITED_ROOT)

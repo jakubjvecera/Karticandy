@@ -1,0 +1,14 @@
+{
+    "generator": {
+        "RozmerKarty": "63.5x88.9mm"
+    },
+    "editor": {
+        "alpha": "0.8",
+        "PopisekKdeJeMaska": "OBRAZEK"
+    },
+    "zdroje": {
+        "excel": "karty.xlsx",
+        "sablona": "sablona_Bezna.svg"
+    },
+    "last_completed_script": "generator"
+}
