@@ -97,6 +97,8 @@ class ScriptGUI:
         self.root.title("Kartičandy")
         self.current_project = current_project
         self._display_to_stem = {}
+        self.excel_process = None
+        self.template_process = None
 
         # Frames
         top_frame = tk.Frame(root)
@@ -108,6 +110,8 @@ class ScriptGUI:
         # Source and Settings buttons
         tk.Button(top_frame, text="Zdroje", command=self.open_source_window, bg="#e0e0e0", width=10).pack(side=tk.RIGHT, padx=10)
         tk.Button(top_frame, text="Nastavení", command=self.open_settings_window, bg="#e0e0e0", width=10).pack(side=tk.RIGHT)
+        tk.Button(top_frame, text="Upravit šablonu", command=self.open_template_edit, bg="#e0e0e0", width=12).pack(side=tk.RIGHT, padx=5)
+        tk.Button(top_frame, text="Upravit Excel", command=self.open_excel_edit, bg="#e0e0e0", width=12).pack(side=tk.RIGHT, padx=5)
 
         self.buttons = {}
         self.time_labels = {}
@@ -132,6 +136,8 @@ class ScriptGUI:
         # Status bar
         self.status_bar = tk.Label(root, text=f"Aktuální projekt: {self.current_project}", bd=1, relief=tk.SUNKEN, anchor=tk.W, font=("Arial", 10, "italic"))
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
     # ---------------- Add a single script button ----------------
     def _add_script_button(self, parent, display_name, stem):
@@ -432,6 +438,100 @@ class ScriptGUI:
             self.console.insert(tk.END, f"{text}\n")
         self.console.see(tk.END)
         self.console.configure(state='disabled')
+
+    def _get_excel_path(self):
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\excel.exe")
+            path, _ = winreg.QueryValueEx(key, "")
+            winreg.CloseKey(key)
+            return path
+        except Exception:
+            return None
+
+    def open_excel_edit(self):
+        project_path = PROJECTS_DIR / self.current_project
+        config_path = project_path / "config.json"
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            excel_name = config["zdroje"].get("excel", "")
+            if not excel_name:
+                messagebox.showwarning("Chyba", "Excel soubor není definován.")
+                return
+            excel_path = project_path / "data" / excel_name
+            if not excel_path.exists():
+                messagebox.showerror("Chyba", f"Soubor neexistuje: {excel_path}")
+                return
+            
+            lock_file = excel_path.parent / f"~${excel_path.name}"
+            if lock_file.exists():
+                messagebox.showwarning("Upozornění", "Excel soubor je již otevřen (existuje zámek).")
+                return
+
+            if self.excel_process and self.excel_process.poll() is None:
+                messagebox.showwarning("Upozornění", "Excel soubor je již otevřen (proces běží).")
+                return
+
+            excel_exe = self._get_excel_path()
+            if excel_exe:
+                # /x vynutí novou instanci, což zajistí, že proces zůstane běžet a půjde sledovat/ukončit
+                self.excel_process = subprocess.Popen([excel_exe, "/x", str(excel_path)])
+            else:
+                # Fallback pokud nenajdeme cestu k Excelu
+                cmd = f'start /WAIT "" "{str(excel_path)}"'
+                self.excel_process = subprocess.Popen(cmd, shell=True)
+
+            self._write_console(f"Otevřen Excel: {excel_name}")
+        except Exception as e:
+            messagebox.showerror("Chyba", f"Nepodařilo se otevřít Excel: {e}")
+
+    def open_template_edit(self):
+        project_path = PROJECTS_DIR / self.current_project
+        config_path = project_path / "config.json"
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            sablona_name = config["zdroje"].get("sablona", "")
+            if not sablona_name:
+                messagebox.showwarning("Chyba", "Šablona není definována.")
+                return
+            sablona_path = project_path / "data" / sablona_name
+            if not sablona_path.exists():
+                messagebox.showerror("Chyba", f"Soubor neexistuje: {sablona_path}")
+                return
+
+            inkscape_path = SRC_DIR / "inkscape_portable/App/Inkscape/bin/inkscape.exe"
+            if not inkscape_path.exists():
+                inkscape_path = SRC_DIR / "inkscape_portable/InkscapePortable.exe"
+            
+            if not inkscape_path.exists():
+                 messagebox.showerror("Chyba", "Inkscape nebyl nalezen v 'src/inkscape_portable'.")
+                 return
+
+            if self.template_process and self.template_process.poll() is None:
+                messagebox.showwarning("Upozornění", "Šablona je již otevřena v Inkscape.")
+                return
+
+            self.template_process = subprocess.Popen([str(inkscape_path), str(sablona_path)])
+            self._write_console(f"Otevřena šablona v Inkscape: {sablona_name}")
+        except Exception as e:
+            messagebox.showerror("Chyba", f"Nepodařilo se otevřít šablonu: {e}")
+
+    def on_close(self):
+        if self.excel_process and self.excel_process.poll() is None:
+            try:
+                # taskkill /F /T /PID pid ukončí strom procesů (cmd -> excel)
+                subprocess.run(f"taskkill /F /T /PID {self.excel_process.pid}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
+
+        if self.template_process and self.template_process.poll() is None:
+            try:
+                self.template_process.terminate()
+            except Exception:
+                pass
+        self.root.destroy()
 
 # ---------------- Application entry point ----------------
 if __name__ == "__main__":
