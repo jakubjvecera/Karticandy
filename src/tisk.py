@@ -163,3 +163,16 @@ def create_backed_pdf():
 if __name__ == "__main__":
     create_print_pdf()    # vytvoří lícové PDF
     create_backed_pdf()   # vloží ruby za každou stránku
+
+    # Uložení cest k vytvořeným souborům do configu
+    if "tisk" not in config:
+        config["tisk"] = {}
+
+    if OUTPUT_PDF.exists():
+        config["tisk"]["pdf_licove"] = str(OUTPUT_PDF.relative_to(PROJECT_PATH))
+    if FINAL_PDF.exists():
+        config["tisk"]["pdf_oboustranne"] = str(FINAL_PDF.relative_to(PROJECT_PATH))
+
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=4, ensure_ascii=False)
+    print("Cesty k PDF souborům uloženy do config.json")

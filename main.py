@@ -104,6 +104,12 @@ class ScriptGUI:
         top_frame = tk.Frame(root)
         top_frame.pack(side=tk.TOP, fill=tk.X, padx=10, pady=10)
 
+        left_frame = tk.Frame(root)
+        left_frame.pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=10)
+        tk.Label(left_frame, text="Výstupy", font=("Arial", 10, "bold")).pack(pady=(0, 5))
+        tk.Button(left_frame, text="Stáhnout PDF\npro tisk", command=self.download_print_pdf, width=18).pack(pady=5)
+        tk.Button(left_frame, text="Stáhnout PDF\noboustranné", command=self.download_backed_pdf, width=18).pack(pady=5)
+
         console_frame = tk.Frame(root)
         console_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=10, pady=10)
 
@@ -532,6 +538,50 @@ class ScriptGUI:
             except Exception:
                 pass
         self.root.destroy()
+
+    def download_print_pdf(self):
+        self._download_pdf_generic("pdf_licove", "karty_pro_tisk.pdf")
+
+    def download_backed_pdf(self):
+        self._download_pdf_generic("pdf_oboustranne", "karty_pro_tisk_oboustranne.pdf")
+
+    def _download_pdf_generic(self, config_key, default_name):
+        project_path = PROJECTS_DIR / self.current_project
+        config_path = project_path / "config.json"
+        
+        try:
+            if not config_path.exists():
+                 messagebox.showerror("Chyba", "Konfigurační soubor neexistuje.")
+                 return
+
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            
+            tisk_config = config.get("tisk", {})
+            rel_path = tisk_config.get(config_key)
+            
+            if not rel_path:
+                messagebox.showerror("Chyba", "Cesta k PDF nebyla nalezena. Pravděpodobně ještě nebyl spuštěn tisk.")
+                return
+            
+            source_path = project_path / rel_path
+            if not source_path.exists():
+                messagebox.showerror("Chyba", f"Soubor PDF fyzicky neexistuje:\n{source_path}")
+                return
+                
+            target_path = filedialog.asksaveasfilename(
+                title="Uložit PDF",
+                initialfile=default_name,
+                defaultextension=".pdf",
+                filetypes=[("PDF soubory", "*.pdf")]
+            )
+            
+            if target_path:
+                shutil.copy2(source_path, target_path)
+                messagebox.showinfo("Úspěch", f"Soubor byl uložen do:\n{target_path}")
+                
+        except Exception as e:
+            messagebox.showerror("Chyba", f"Nastala chyba při ukládání PDF:\n{e}")
 
 # ---------------- Application entry point ----------------
 if __name__ == "__main__":
